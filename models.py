@@ -157,8 +157,6 @@ class JetNet(nn.Module):
         torch_model = JetNet()
 
         for torch_layer, tf_layer in zip(torch_model.layers(), tf_model.layers[1:]):
-            # print(torch_layer.parameters())
-            # print(tf_layer.trainable_weights)
             for torch_p, tf_p in zip(torch_layer.parameters(), tf_layer.trainable_weights):
                 if torch_p.dim() != 1:
                     print(torch_p.shape)
