@@ -2,3 +2,4 @@ venv
 SPLObjDetectDatasetV2/*
 !SPLObjDetectDatasetV2/train.ipynb
 players_deeptector.h5
+__pycache__
