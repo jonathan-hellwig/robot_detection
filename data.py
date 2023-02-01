@@ -17,11 +17,12 @@ class Encoder:
     # TODO: Validate encoding
     # TODO: Separate Classes into a separate tensor
     def apply(self, object_classes, bounding_boxes):
+        NUM_BOX_PARAMETERS = 4
         feature_map_height, feature_map_width = self.feature_map_size
         encoded_bounding_boxes = torch.zeros(
-            (feature_map_height, feature_map_width, len(self.default_scalings), 4))
+            (feature_map_height, feature_map_width, len(self.default_scalings), NUM_BOX_PARAMETERS))
         ground_truth_classes = torch.zeros(
-            (feature_map_height, feature_map_width, self.num_classes + 1))
+            (feature_map_height, feature_map_width), dtype=torch.long)
         for target_box, ground_truth_class in zip(bounding_boxes, object_classes):
             ground_truth_center = target_box[0:2]
             ground_truth_size = target_box[2:4]
@@ -31,7 +32,7 @@ class Encoder:
                     default_box_center = torch.tensor(
                         [i / feature_map_width, j / feature_map_height])
                     offset_box = torch.concat(
-                        (ground_truth_center-default_box_center, ground_truth_size))
+                        ((ground_truth_center-default_box_center) / default_scaling, torch.log(ground_truth_size / default_scaling)))
                     # TODO: Think about the scaling
                     jaccard_overlaps.append((jaccard_overlap(default_box_center,
                                                              default_scaling, ground_truth_center, ground_truth_size), (i, j, k), offset_box))
@@ -43,6 +44,19 @@ class Encoder:
                 encoded_bounding_boxes[i, j, k, :] = offset_box
                 ground_truth_classes[i, j] = ground_truth_class
         return encoded_bounding_boxes, ground_truth_classes
+
+
+def jaccard_overlap(center_first: torch.Tensor, size_first: torch.Tensor, center_second: torch.Tensor, size_second: torch.Tensor) -> float:
+    upper_left_first = center_first - size_first / 2
+    lower_right_first = center_first + size_first / 2
+    upper_left_second = center_second - size_second / 2
+    lower_right_second = center_second + size_second / 2
+
+    intersection_area = max(0, min(lower_right_first[0], lower_right_second[0]) - max(upper_left_first[0], upper_left_second[0])) * max(
+        0, min(lower_right_first[1], lower_right_second[1]) - max(upper_left_first[1], upper_left_second[1]))
+    union_area = size_first[0] * size_first[1] + \
+        size_second[0] * size_second[1] - intersection_area
+    return intersection_area / union_area
 
 
 class ObjectDetectionDataset(torch.utils.data.Dataset):
@@ -68,7 +82,7 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
             bounding_boxes.append(torch.tensor(np.fromstring(
                 label_string[1:], sep=' ', dtype=np.float32)))
             object_classes.append(torch.tensor(np.fromstring(
-                label_string[0], sep=' ', dtype=np.float32)))
+                label_string[0], sep=' ', dtype=np.float32), dtype=torch.long))
         encoded_bounding_boxes, ground_truth_classes = self.encoder.apply(
             object_classes, bounding_boxes)
         if self.transforms is not None:
@@ -79,22 +93,9 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
         return len(self.images)
 
 
-def jaccard_overlap(center_first: torch.Tensor, size_first: torch.Tensor, center_second: torch.Tensor, size_second: torch.Tensor) -> float:
-    upper_left_first = center_first - size_first / 2
-    lower_right_first = center_first + size_first / 2
-    upper_left_second = center_second - size_second / 2
-    lower_right_second = center_second + size_second / 2
-
-    intersection_area = max(0, min(lower_right_first[0], lower_right_second[0]) - max(upper_left_first[0], upper_left_second[0])) * max(
-        0, min(lower_right_first[1], lower_right_second[1]) - max(upper_left_first[1], upper_left_second[1]))
-    union_area = size_first[0] * size_first[1] + \
-        size_second[0] * size_second[1] - intersection_area
-    return intersection_area / union_area
-
-
-def calculate_mean_std(dataset):
+def calculate_mean_std(dataset: ObjectDetectionDataset):
     means = []
-    for image, target in tqdm.tqdm(dataset):
+    for image, _, _ in tqdm.tqdm(dataset):
         means.append(torch.mean(image, dim=(1, 2)))
     stacked_means = torch.stack(means)
     mean = torch.mean(stacked_means, dim=0)
