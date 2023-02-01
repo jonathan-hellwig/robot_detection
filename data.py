@@ -15,14 +15,15 @@ class Encoder:
         self.threshold = threshold
 
     # TODO: Validate encoding
-    # TODO: Separate Classes into a separate tensor
     def apply(self, object_classes, bounding_boxes):
         NUM_BOX_PARAMETERS = 4
         feature_map_height, feature_map_width = self.feature_map_size
         encoded_bounding_boxes = torch.zeros(
             (feature_map_height, feature_map_width, len(self.default_scalings), NUM_BOX_PARAMETERS))
-        ground_truth_classes = torch.zeros(
-            (feature_map_height, feature_map_width), dtype=torch.long)
+        target_mask = torch.zeros(
+            (feature_map_height, feature_map_width), dtype=torch.bool)
+        target_classes = torch.zeros(
+            (feature_map_height, feature_map_width, len(self.default_scalings)), dtype=torch.long)
         for target_box, ground_truth_class in zip(bounding_boxes, object_classes):
             ground_truth_center = target_box[0:2]
             ground_truth_size = target_box[2:4]
@@ -42,8 +43,10 @@ class Encoder:
             # TODO: Resolve conflicts between boxes
             for _, (i, j, k), offset_box in [max_overlap] + threshold_overlap:
                 encoded_bounding_boxes[i, j, k, :] = offset_box
-                ground_truth_classes[i, j] = ground_truth_class
-        return encoded_bounding_boxes, ground_truth_classes
+                target_mask[i, j] = True
+                target_classes[i, j, :] = ground_truth_class + 1
+        target_classes = target_classes.flatten()
+        return encoded_bounding_boxes, target_mask, target_classes
 
 
 def jaccard_overlap(center_first: torch.Tensor, size_first: torch.Tensor, center_second: torch.Tensor, size_second: torch.Tensor) -> float:
@@ -83,11 +86,11 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
                 label_string[1:], sep=' ', dtype=np.float32)))
             object_classes.append(torch.tensor(np.fromstring(
                 label_string[0], sep=' ', dtype=np.float32), dtype=torch.long))
-        encoded_bounding_boxes, ground_truth_classes = self.encoder.apply(
+        encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
             object_classes, bounding_boxes)
         if self.transforms is not None:
             image = self.transforms(image)
-        return image, encoded_bounding_boxes, ground_truth_classes
+        return image, encoded_bounding_boxes, target_mask, target_classes
 
     def __len__(self):
         return len(self.images)

@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 import tensorflow as tf
+import pytorch_lightning as pl
 
 
 class JetNet(nn.Module):
@@ -272,54 +275,46 @@ class MultiClassJetNet(nn.Module):
         ]
 
     def forward(self, x):
-        x = self.batch_normalization_1(x)
-        x = self.conv2d_1(x)
+        for layer in self.layers():
+            x = layer(x)
+        return self._format_model_output(x)
 
-        x = self.batch_normalization_2(x)
-        x = self.depthwise_conv2d_1(x)
-        x = self.conv2d_2(x)
+    def _format_model_output(self, output):
+        FEATURE_MAP_HEIGHT = 8
+        FEATURE_MAP_WIDTH = 10
+        NUM_BOX_PARAMETERS = 4
+        reshaped_ouput = output.reshape(
+            (-1, self.num_scalings, NUM_BOX_PARAMETERS + self.num_classes + 1, FEATURE_MAP_HEIGHT, FEATURE_MAP_WIDTH))
+        predicted_boxes = reshaped_ouput[:, :,
+                                         0:NUM_BOX_PARAMETERS, :, :].permute((0, 3, 4, 1, 2))
+        object_class_logits = reshaped_ouput[:, :,
+                                             NUM_BOX_PARAMETERS:, :, :].permute((0, 3, 4, 1, 2)).reshape((-1, self.num_classes + 1))
+        return predicted_boxes, object_class_logits
 
-        x = self.batch_normalization_3(x)
-        x = self.depthwise_conv2d_2(x)
-        x = self.conv2d_3(x)
 
-        x = self.batch_normalization_4(x)
-        x = self.depthwise_conv2d_3(x)
-        x = self.conv2d_4(x)
+class LightningMultiClassJetNet(pl.LightningModule):
+    def __init__(self, num_classes, num_scalings) -> None:
+        super().__init__()
+        self.model = MultiClassJetNet(num_classes, num_scalings)
 
-        x = self.batch_normalization_5(x)
-        x = self.depthwise_conv2d_4(x)
-        x = self.conv2d_5(x)
+    def training_step(self, batch, batch_idx):
+        image, target_boxes, target_mask, target_classes = batch
+        selected_target_boxes = target_boxes[target_mask]
+        predicted_boxes, object_class_logits = self.model(image)
+        selected_predicted_boxes = predicted_boxes[target_mask]
+        # TODO: Check wether the permute operation gets handled correctly by autodiff
+        # TODO: Handle the case when there is no box!
+        location_loss = F.smooth_l1_loss(
+            selected_predicted_boxes, selected_target_boxes)
+        classification_loss = F.cross_entropy(
+            object_class_logits, target_classes.flatten())
+        loss = location_loss + classification_loss
+        self.log('train_loss', loss)
+        return loss
 
-        x = self.batch_normalization_6(x)
-        x = self.depthwise_conv2d_5(x)
-        x = self.conv2d_6(x)
-
-        x = self.batch_normalization_7(x)
-        x = self.depthwise_conv2d_6(x)
-        x = self.conv2d_7(x)
-
-        x = self.batch_normalization_8(x)
-        x = self.depthwise_conv2d_7(x)
-        x = self.conv2d_8(x)
-
-        x = self.batch_normalization_9(x)
-        x = self.depthwise_conv2d_8(x)
-        x = self.conv2d_9(x)
-
-        x = self.batch_normalization_10(x)
-        x = self.conv2d_10(x)
-
-        x = self.batch_normalization_11(x)
-        x = self.conv2d_11(x)
-
-        x = self.batch_normalization_12(x)
-        x = self.conv2d_12(x)
-
-        x = self.batch_normalization_13(x)
-        x = self.conv2d_13(x)
-        x = self.conv2d_14(x)
-        return x
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=1e-3)
+        return optimizer
 
 
 if __name__ == "__main__":
