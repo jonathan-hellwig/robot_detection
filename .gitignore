@@ -1,6 +1,7 @@
 venv
-SPLObjDetectDatasetV2/*
-!SPLObjDetectDatasetV2/train.ipynb
+torch_2_venv
 players_deeptector.h5
 __pycache__
 lightning_logs
+data/**/images
+data/**/labels
