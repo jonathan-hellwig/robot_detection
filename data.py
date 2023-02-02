@@ -63,18 +63,20 @@ def jaccard_overlap(center_first: torch.Tensor, size_first: torch.Tensor, center
 
 
 class ObjectDetectionDataset(torch.utils.data.Dataset):
-    def __init__(self, encoder: Encoder, transforms=None) -> None:
+    def __init__(self, data_path: str, encoder: Encoder, transforms=None) -> None:
         self.encoder = encoder
         self.transforms = transforms
+        self.data_path = data_path
         self.images = sorted(os.listdir(
-            'SPLObjDetectDatasetV2/trainval/images/'))
+            data_path + '/images/'))
         self.labels = sorted(os.listdir(
-            'SPLObjDetectDatasetV2/trainval/labels/'))
+            data_path + '/labels/'))
 
     def __getitem__(self, idx):
-        image_path = 'SPLObjDetectDatasetV2/trainval/images/' + \
+        # TODO: This might break if one label file is missing!
+        image_path = self.data_path + '/images/' + \
             self.images[idx]
-        label_path = 'SPLObjDetectDatasetV2/trainval/labels/' + \
+        label_path = self.data_path + '/labels/' + \
             self.labels[idx]
         image = Image.open(image_path)
         label_strings = open(label_path).read().splitlines()

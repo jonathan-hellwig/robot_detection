@@ -312,6 +312,20 @@ class LightningMultiClassJetNet(pl.LightningModule):
         self.log('train_loss', loss)
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        image, target_boxes, target_mask, target_classes = batch
+        selected_target_boxes = target_boxes[target_mask]
+        predicted_boxes, object_class_logits = self.model(image)
+        selected_predicted_boxes = predicted_boxes[target_mask]
+        # TODO: Check wether the permute operation gets handled correctly by autodiff
+        # TODO: Handle the case when there is no box!
+        location_loss = F.smooth_l1_loss(
+            selected_predicted_boxes, selected_target_boxes)
+        classification_loss = F.cross_entropy(
+            object_class_logits, target_classes.flatten())
+        loss = location_loss + classification_loss
+        self.log('val_loss', loss)
+
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
