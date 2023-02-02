@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import tensorflow as tf
+# import tensorflow as tf
 import pytorch_lightning as pl
 
 
@@ -154,21 +154,21 @@ class JetNet(nn.Module):
         x = self.conv2d_14(x)
         return x
 
-    @classmethod
-    def from_hdf5(cls, hdf5_path):
-        tf_model = tf.keras.models.load_model(hdf5_path)
-        torch_model = JetNet()
+    # @classmethod
+    # def from_hdf5(cls, hdf5_path):
+    #     tf_model = tf.keras.models.load_model(hdf5_path)
+    #     torch_model = JetNet()
 
-        for torch_layer, tf_layer in zip(torch_model.layers(), tf_model.layers[1:]):
-            for torch_p, tf_p in zip(torch_layer.parameters(), tf_layer.trainable_weights):
-                if torch_p.dim() != 1:
-                    print(torch_p.shape)
-                    print(tf_p.shape)
-                    torch_p = torch.from_numpy(
-                        tf_p.numpy()).permute((2, 3, 1, 0))
-                else:
-                    torch_p = torch.from_numpy(tf_p.numpy())
-        return torch_model
+    #     for torch_layer, tf_layer in zip(torch_model.layers(), tf_model.layers[1:]):
+    #         for torch_p, tf_p in zip(torch_layer.parameters(), tf_layer.trainable_weights):
+    #             if torch_p.dim() != 1:
+    #                 print(torch_p.shape)
+    #                 print(tf_p.shape)
+    #                 torch_p = torch.from_numpy(
+    #                     tf_p.numpy()).permute((2, 3, 1, 0))
+    #             else:
+    #                 torch_p = torch.from_numpy(tf_p.numpy())
+    #     return torch_model
 
 
 class MultiClassJetNet(nn.Module):
@@ -295,6 +295,7 @@ class MultiClassJetNet(nn.Module):
 class LightningMultiClassJetNet(pl.LightningModule):
     def __init__(self, num_classes, num_scalings) -> None:
         super().__init__()
+        # self.model = torch.compile(MultiClassJetNet(num_classes, num_scalings))
         self.model = MultiClassJetNet(num_classes, num_scalings)
 
     def training_step(self, batch, batch_idx):
@@ -331,7 +332,7 @@ class LightningMultiClassJetNet(pl.LightningModule):
         return optimizer
 
 
-if __name__ == "__main__":
-    hdf5_path = '../players_deeptector.h5'
-    model = JetNet.from_hdf5(hdf5_path)
-    torch.save(model, 'torch_weights.pt')
+# if __name__ == "__main__":
+#     hdf5_path = '../players_deeptector.h5'
+#     model = JetNet.from_hdf5(hdf5_path)
+#     torch.save(model, 'torch_weights.pt')

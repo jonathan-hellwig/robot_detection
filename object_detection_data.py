@@ -156,6 +156,8 @@ def save_bounding_boxes(data_path):
             object_classes_image.append(torch.tensor(np.fromstring(
                 label_string[0], sep=' ', dtype=np.float32), dtype=torch.long))
         bounding_boxes.append(bounding_boxes_image)
+        bounding_boxes.append(bounding_boxes_image)
+        object_classes.append(object_classes_image)
         object_classes.append(object_classes_image)
     torch.save(bounding_boxes, data_path + '/bounding_boxes.pt')
     torch.save(object_classes, data_path + '/object_classes.pt')
