@@ -20,6 +20,7 @@ class Encoder:
         self.default_boxes_xy_hw = self._default_boxes_xy_hw()
 
     def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor):
+        NUM_BOX_PARAMETERS = 4
         # Select the default box with the highest IoU and with IoU higher than the threshold value
         target_boxes_tl_br = torch.zeros((target_boxes.size(0), 4))
         target_boxes_tl_br[:, 0:2] = target_boxes[:,
@@ -39,10 +40,11 @@ class Encoder:
         selected_default_boxes = self.default_boxes_xy_hw[mask_idx]
 
         # Encode target boxes with relative offsets to default box
-        encoded_target_boxes = torch.zeros((mask_idx.sum(0), 4))
-        encoded_target_boxes[:, 0:2] = (selected_default_boxes[:, 0:2] -
+        encoded_target_boxes = torch.zeros(
+            (self.default_boxes_xy_hw.size(0), NUM_BOX_PARAMETERS))
+        encoded_target_boxes[mask_idx, 0:2] = (selected_default_boxes[:, 0:2] -
                                         selected_target_boxes[:, 0:2]) / selected_default_boxes[:, 2:4]
-        encoded_target_boxes[:, 2:4] = torch.log(
+        encoded_target_boxes[mask_idx, 2:4] = torch.log(
             selected_target_boxes[:, 2:4] / selected_default_boxes[:, 2:4])
 
         dbox_classes = torch.zeros(
@@ -147,7 +149,7 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
 
         if self.transforms is not None:
             image = self.transforms(image)
-        return image, encoded_bounding_boxes, target_classes
+        return image, encoded_bounding_boxes, target_mask, target_classes
 
     def __len__(self):
         return len(self.images)
