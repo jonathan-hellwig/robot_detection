@@ -264,6 +264,7 @@ def preprocess_data(data_path, augmentations = [lambda x: x]):
     train_data = ObjectDetectionDataset(data_path, transforms=transforms)
     images = []
     image_means = []
+    image_stds = []
     target_bounding_boxes = []
     target_classes = []
     for i, (image, target_bounding_box, target_class) in enumerate(train_data):
@@ -272,11 +273,14 @@ def preprocess_data(data_path, augmentations = [lambda x: x]):
             target_bounding_boxes.append(target_bounding_box)
             target_classes.append(target_class)
             image_means.append(torch.mean(images[-1], dim=(1, 2)))
+            image_stds.append(torch.std(images[-1], dim=(1, 2)))
         if i % 10 == 0:
             print(f"{i}/{len(train_data)}")
     image_means = torch.tensor(image_means)
+    image_stds = torch.tensor(image_stds)
     image_mean = torch.mean(image_means)
-    image_std = torch.std(image_means)
+    image_std = torch.mean(image_stds)
+    
     stacked_images = (torch.stack(images) - image_mean) / image_std
     torch.save(stacked_images, data_path + "/transformed_images.pt")
     torch.save(target_bounding_boxes, data_path + "/target_bounding_boxes.pt")
