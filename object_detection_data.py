@@ -165,8 +165,7 @@ def calc_iou_tensor(box1, box2):
 
 
 class ObjectDetectionDataset(torch.utils.data.Dataset):
-    def __init__(self, data_path: str, encoder: Encoder, transforms=None) -> None:
-        self.encoder = encoder
+    def __init__(self, data_path: str, transforms=None) -> None:
         self.transforms = transforms
         self.data_path = data_path
         self.images = sorted(os.listdir(data_path + "/images/"))
@@ -192,15 +191,9 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
         target_bounding_boxes = torch.tensor(np.array(target_bounding_boxes))
         target_classes = torch.tensor(np.array(target_classes)) + 1
 
-        (
-            encoded_bounding_boxes,
-            target_mask,
-            encoded_target_classes,
-        ) = self.encoder.apply(target_bounding_boxes, target_classes)
-
         if self.transforms is not None:
             image = self.transforms(image)
-        return image, encoded_bounding_boxes, target_mask, encoded_target_classes
+        return image, target_bounding_boxes, target_classes
 
     def __len__(self):
         return len(self.images)
@@ -210,8 +203,8 @@ class TransformedDataset(torch.utils.data.Dataset):
     def __init__(self, data_path: str, encoder: Encoder) -> None:
         self.encoder = encoder
         self.images = torch.load(data_path + "/transformed_images.pt")
-        bounding_boxes = torch.load(data_path + "/bounding_boxes.pt")
-        object_classes = torch.load(data_path + "/object_classes.pt")
+        bounding_boxes = torch.load(data_path + "/target_bounding_boxes.pt")
+        object_classes = torch.load(data_path + "/target_classes.pt")
         self.encoded_bounding_boxes = []
         self.encoded_object_classes = []
         self.target_masks = []
@@ -259,34 +252,7 @@ def create_train_val_split():
         )
 
 
-def save_bounding_boxes(data_path):
-    labels = sorted(os.listdir(data_path + "/labels/"))
-    bounding_boxes = []
-    object_classes = []
-    for label_path in labels:
-        label_strings = open(data_path + "/labels/" + label_path).read().splitlines()
-        bounding_boxes_image = []
-        object_classes_image = []
-        for label_string in label_strings:
-            bounding_boxes_image.append(
-                np.fromstring(label_string[1:], sep=" ", dtype=np.float32)
-            )
-            object_classes_image.append(
-                np.fromstring(label_string[0], sep=" ", dtype=np.float32)
-            )
-        bounding_boxes.append(torch.tensor(np.array(bounding_boxes_image)))
-        bounding_boxes.append(torch.tensor(np.array(bounding_boxes_image)))
-        object_classes.append(
-            torch.tensor(np.array(object_classes_image), dtype=torch.long)
-        )
-        object_classes.append(
-            torch.tensor(np.array(object_classes_image), dtype=torch.long)
-        )
-    torch.save(bounding_boxes, data_path + "/bounding_boxes.pt")
-    torch.save(object_classes, data_path + "/object_classes.pt")
-
-
-def save_transformed_images(data_path):
+def preprocess_data(data_path, augmentations = [lambda x: x]):
     transforms = T.Compose(
         [
             T.Grayscale(),
@@ -295,24 +261,17 @@ def save_transformed_images(data_path):
             T.Resize((60, 80)),
         ]
     )
-    default_scalings = [
-        torch.tensor([0.25, 0.25]),
-        torch.tensor([0.125, 0.125]),
-        torch.tensor([0.125 / 2, 0.125 / 2]),
-        torch.tensor([0.125 / 4, 0.125 / 4]),
-    ]
-    feature_map_size = (8, 10)
-    num_classes = 4
-    encoder = Encoder(default_scalings, feature_map_size, num_classes)
-    train_data = ObjectDetectionDataset(data_path, encoder, transforms=transforms)
+    train_data = ObjectDetectionDataset(data_path, transforms=transforms)
     images = []
     image_means = []
-    i = 0
-    for image, _, _, _ in train_data:
-        images.append(image)
-        images.append(torchvision.transforms.functional.hflip(image))
-        image_means.append(torch.mean(image, dim=(1, 2)))
-        i += 1
+    target_bounding_boxes = []
+    target_classes = []
+    for i, (image, target_bounding_box, target_class) in enumerate(train_data):
+        for augmentation in augmentations:
+            images.append(augmentation(image))
+            target_bounding_boxes.append(target_bounding_box)
+            target_classes.append(target_class)
+            image_means.append(torch.mean(images[-1], dim=(1, 2)))
         if i % 10 == 0:
             print(f"{i}/{len(train_data)}")
     image_means = torch.tensor(image_means)
@@ -320,11 +279,11 @@ def save_transformed_images(data_path):
     image_std = torch.std(image_means)
     stacked_images = (torch.stack(images) - image_mean) / image_std
     torch.save(stacked_images, data_path + "/transformed_images.pt")
+    torch.save(target_bounding_boxes, data_path + "/target_bounding_boxes.pt")
+    torch.save(target_classes, data_path + "/target_classes.pt")
 
 
 if __name__ == "__main__":
-    save_bounding_boxes("data/train")
-    save_bounding_boxes("data/val")
-
-    # save_transformed_images('data/val')
-    # save_transformed_images('data/train')
+    augmentations = [lambda x: x, torchvision.transforms.functional.hflip]
+    preprocess_data('data/val')
+    preprocess_data("data/train", augmentations)
