@@ -18,19 +18,21 @@ class Encoder:
         num_classes: int,
         threshold: float = 0.5,
     ) -> None:
+        # width x height
         self.default_scalings = default_scalings
         self.feature_map_size = feature_map_size
         self.num_classes = num_classes
         self.threshold = threshold
-        self.default_boxes_tr_bl = self._default_boxes_tr_bl()
-        self.default_boxes_xy_hw = self._default_boxes_xy_hw()
+        self.default_boxes_tr_bl = self._default_boxes_tl_br()
+        self.default_boxes_xy_wh = self._default_boxes_xy_wh()
 
     def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor):
         NUM_BOX_PARAMETERS = 4
-        # Select the default box with the highest IoU and with IoU higher than the threshold value
+        # Transform bounding boxes from (cx, cy, w, h) to (x_top_left, y_top_left, x_bottom_right, y_bottom_right)
         target_boxes_tl_br = torch.zeros((target_boxes.size(0), 4))
         target_boxes_tl_br[:, 0:2] = target_boxes[:, 0:2] - target_boxes[:, 3:4] / 2
         target_boxes_tl_br[:, 2:4] = target_boxes[:, 0:2] + target_boxes[:, 3:4] / 2
+        # Select the default box with the highest IoU and with IoU higher than the threshold value
         ious = calc_iou_tensor(target_boxes_tl_br, self.default_boxes_tr_bl)
         _, best_dbox_idx = ious.max(dim=1)
         masked_ious = (
@@ -48,11 +50,11 @@ class Encoder:
 
         mask_idx = best_value > 0
         selected_target_boxes = target_boxes[best_idx[mask_idx]]
-        selected_default_boxes = self.default_boxes_xy_hw[mask_idx]
+        selected_default_boxes = self.default_boxes_xy_wh[mask_idx]
 
         # Encode target boxes with relative offsets to default box
         encoded_target_boxes = torch.zeros(
-            (self.default_boxes_xy_hw.size(0), NUM_BOX_PARAMETERS)
+            (self.default_boxes_xy_wh.size(0), NUM_BOX_PARAMETERS)
         )
         encoded_target_boxes[mask_idx, 0:2] = (
             selected_default_boxes[:, 0:2] - selected_target_boxes[:, 0:2]
@@ -61,12 +63,12 @@ class Encoder:
             selected_target_boxes[:, 2:4] / selected_default_boxes[:, 2:4]
         )
 
-        dbox_classes = torch.zeros(self.default_boxes_xy_hw.size(0), dtype=torch.long)
+        dbox_classes = torch.zeros(self.default_boxes_xy_wh.size(0), dtype=torch.long)
 
         dbox_classes[mask_idx] = target_classes[best_idx[mask_idx]].flatten()
         return encoded_target_boxes, mask_idx, dbox_classes
 
-    def _default_boxes_tr_bl(self):
+    def _default_boxes_tl_br(self):
         NUM_BOX_PARAMETERS = 4
         feature_map_height, feature_map_width = self.feature_map_size
         default_boxes = torch.zeros(
@@ -75,22 +77,24 @@ class Encoder:
                 NUM_BOX_PARAMETERS,
             )
         )
-        for i in range(default_boxes.size(0) // self.default_scalings.size(0)):
+        for i in range(feature_map_height * feature_map_width):
             selected_boxes_idx = range(
                 i * self.default_scalings.size(0),
                 (i + 1) * self.default_scalings.size(0),
             )
+            idx_width = i % feature_map_width
+            idx_height = i // feature_map_width
             top_left = torch.tensor(
                 [
-                    (i % feature_map_width) / feature_map_width,
-                    (i // feature_map_width) / feature_map_height,
+                    idx_width / feature_map_width,
+                    idx_height / feature_map_height,
                 ]
             )
             default_boxes[selected_boxes_idx, 0:2] = top_left
             default_boxes[selected_boxes_idx, 2:4] = top_left + self.default_scalings
         return default_boxes
 
-    def _default_boxes_xy_hw(self):
+    def _default_boxes_xy_wh(self):
         NUM_BOX_PARAMETERS = 4
         feature_map_height, feature_map_width = self.feature_map_size
         default_boxes = torch.zeros(
@@ -99,15 +103,17 @@ class Encoder:
                 NUM_BOX_PARAMETERS,
             )
         )
-        for i in range(default_boxes.size(0) // self.default_scalings.size(0)):
+        for i in range(feature_map_height * feature_map_width):
             selected_boxes_idx = range(
                 i * self.default_scalings.size(0),
                 (i + 1) * self.default_scalings.size(0),
             )
+            idx_width = i % feature_map_width
+            idx_height = i // feature_map_width
             top_left = torch.tensor(
                 [
-                    (i % feature_map_width) / feature_map_width,
-                    (i // feature_map_width) / feature_map_height,
+                    idx_width / feature_map_width,
+                    idx_height / feature_map_height,
                 ]
             )
             default_boxes[selected_boxes_idx, 0:2] = (
@@ -123,10 +129,10 @@ class Encoder:
         """
         class_probs = F.softmax(class_logits, dim=-1)
         decoded_boxes = torch.zeros(boxes.shape)
-        decoded_boxes[:, :, :, :, 0:2] = self.default_boxes_xy_hw[:, :, :, :, 2:4] * (
-            self.default_boxes_xy_hw[:, 0:2] - boxes
+        decoded_boxes[:, :, :, :, 0:2] = self.default_boxes_xy_wh[:, :, :, :, 2:4] * (
+            self.default_boxes_xy_wh[:, 0:2] - boxes
         )
-        decoded_boxes[:, :, :, :, 2:4] = self.default_boxes_xy_hw[
+        decoded_boxes[:, :, :, :, 2:4] = self.default_boxes_xy_wh[
             :, :, :, :, 2:4
         ] * torch.exp(boxes[:, :, :, :, 2:4])
         return decoded_boxes, class_probs
@@ -165,13 +171,17 @@ def calc_iou_tensor(box1, box2):
 
 
 class ObjectDetectionDataset(torch.utils.data.Dataset):
-    def __init__(self, data_path: str, transforms=None) -> None:
-        self.transforms = transforms
+    def __init__(
+        self, data_path: str, image_transforms=None, bounding_box_transforms=None
+    ) -> None:
+        self.image_transforms = image_transforms
+        self.bounding_box_transforms = bounding_box_transforms
         self.data_path = data_path
         self.images = sorted(os.listdir(data_path + "/images/"))
         self.labels = sorted(os.listdir(data_path + "/labels/"))
 
     def __getitem__(self, idx):
+        # Check if paths are equal
         image_path = self.data_path + "/images/" + self.images[idx]
         label_path = self.data_path + "/labels/" + self.labels[idx]
         image = Image.open(image_path)
@@ -190,9 +200,10 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
             )
         target_bounding_boxes = torch.tensor(np.array(target_bounding_boxes))
         target_classes = torch.tensor(np.array(target_classes)) + 1
-
-        if self.transforms is not None:
-            image = self.transforms(image)
+        if self.bounding_box_transforms:
+            target_bounding_boxes = self.bounding_box_transforms(target_bounding_boxes)
+        if self.image_transforms:
+            image = self.image_transforms(image)
         return image, target_bounding_boxes, target_classes
 
     def __len__(self):
@@ -208,7 +219,9 @@ class TransformedDataset(torch.utils.data.Dataset):
         self.encoded_bounding_boxes = []
         self.encoded_object_classes = []
         self.target_masks = []
-        for bounding_box, object_class in zip(bounding_boxes, object_classes):
+        for i, (bounding_box, object_class) in enumerate(
+            zip(bounding_boxes, object_classes)
+        ):
             encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
                 bounding_box, object_class
             )
@@ -222,6 +235,7 @@ class TransformedDataset(torch.utils.data.Dataset):
             self.encoded_bounding_boxes[idx],
             self.target_masks[idx],
             self.encoded_object_classes[idx],
+            idx,
         )
 
     def __len__(self):
@@ -252,8 +266,12 @@ def create_train_val_split():
         )
 
 
-def preprocess_data(data_path, augmentations = [lambda x: x]):
-    transforms = T.Compose(
+def preprocess_data(
+    data_path,
+    image_augmentations=[lambda x: x],
+    bounding_box_augmentations=[lambda x: x],
+):
+    image_transforms = T.Compose(
         [
             T.Grayscale(),
             T.PILToTensor(),
@@ -261,16 +279,23 @@ def preprocess_data(data_path, augmentations = [lambda x: x]):
             T.Resize((60, 80)),
         ]
     )
-    train_data = ObjectDetectionDataset(data_path, transforms=transforms)
+    bounding_box_transforms = T.Compose([])
+    train_data = ObjectDetectionDataset(
+        data_path,
+        image_transforms=image_transforms,
+        bounding_box_transforms=bounding_box_transforms,
+    )
     images = []
     image_means = []
     image_stds = []
     target_bounding_boxes = []
     target_classes = []
     for i, (image, target_bounding_box, target_class) in enumerate(train_data):
-        for augmentation in augmentations:
-            images.append(augmentation(image))
-            target_bounding_boxes.append(target_bounding_box)
+        for image_augmentation, bounding_box_augmentation in zip(
+            image_augmentations, bounding_box_augmentations
+        ):
+            images.append(image_augmentation(image))
+            target_bounding_boxes.append(bounding_box_augmentation(target_bounding_box))
             target_classes.append(target_class)
             image_means.append(torch.mean(images[-1], dim=(1, 2)))
             image_stds.append(torch.std(images[-1], dim=(1, 2)))
@@ -280,14 +305,22 @@ def preprocess_data(data_path, augmentations = [lambda x: x]):
     image_stds = torch.tensor(image_stds)
     image_mean = torch.mean(image_means)
     image_std = torch.mean(image_stds)
-    
+
     stacked_images = (torch.stack(images) - image_mean) / image_std
     torch.save(stacked_images, data_path + "/transformed_images.pt")
     torch.save(target_bounding_boxes, data_path + "/target_bounding_boxes.pt")
     torch.save(target_classes, data_path + "/target_classes.pt")
+    torch.save(torch.tensor([image_mean, image_std]), data_path + "/image_normalize.pt")
+
+
+def flip_bounding_boxes(bounding_boxes):
+    bounding_boxes = bounding_boxes.clone()
+    bounding_boxes[:, 0] = 1 - bounding_boxes[:, 0]
+    return bounding_boxes
 
 
 if __name__ == "__main__":
-    augmentations = [lambda x: x, torchvision.transforms.functional.hflip]
-    preprocess_data('data/val')
-    preprocess_data("data/train", augmentations)
+    image_augmentations = [lambda x: x, torchvision.transforms.functional.hflip]
+    bounding_box_augmentations = [lambda x: x, flip_bounding_boxes]
+    preprocess_data("data/val")
+    preprocess_data("data/train", image_augmentations, bounding_box_augmentations)
