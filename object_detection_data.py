@@ -24,8 +24,8 @@ class Encoder:
         self.feature_map_size = feature_map_size
         self.num_classes = num_classes
         self.threshold = threshold
-        self.default_boxes_tr_bl = self._default_boxes_("xywh")
-        self.default_boxes_xy_wh = self._default_boxes_("tlbr")
+        self.default_boxes_tl_br = self._default_boxes("tlbr")
+        self.default_boxes_xy_wh = self._default_boxes("xywh")
 
     def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor):
         NUM_BOX_PARAMETERS = 4
@@ -34,13 +34,13 @@ class Encoder:
         target_boxes_tl_br[:, 0:2] = target_boxes[:, 0:2] - target_boxes[:, 2:4] / 2
         target_boxes_tl_br[:, 2:4] = target_boxes[:, 0:2] + target_boxes[:, 2:4] / 2
         # Select the default box with the highest IoU and with IoU higher than the threshold value
-        ious = calc_iou_tensor(target_boxes_tl_br, self.default_boxes_tr_bl)
+        ious = calc_iou_tensor(target_boxes_tl_br, self.default_boxes_tl_br)
         _, best_dbox_idx = ious.max(dim=1)
         masked_ious = (
             torch.logical_or(
                 (
                     best_dbox_idx
-                    == torch.arange(0, self.default_boxes_tr_bl.size(0)).reshape(-1, 1)
+                    == torch.arange(0, self.default_boxes_tl_br.size(0)).reshape(-1, 1)
                 ).T,
                 ious > self.threshold,
             )
@@ -69,6 +69,19 @@ class Encoder:
         dbox_classes[mask_idx] = target_classes[best_idx[mask_idx]].flatten()
         return encoded_target_boxes, mask_idx, dbox_classes
 
+    def decode_bounding_boxes(self, encoded_bounding_boxes, mask_idx):
+        selected_target_boxes = encoded_bounding_boxes[mask_idx]
+        selected_default_boxes = self.default_boxes_xy_wh[mask_idx]
+        output = torch.zeros_like(selected_target_boxes)
+        output[:, 0:2] = (
+            selected_default_boxes[:, 0:2]
+            - selected_target_boxes[:, 0:2] * selected_default_boxes[:, 2:4]
+        )
+
+        output[:, 2:4] = (
+            torch.exp(selected_target_boxes[:, 2:4]) * selected_default_boxes[:, 2:4]
+        )
+        return output
 
     def _default_boxes(self, type):
         assert type in ["xywh", "tlbr"]
@@ -76,19 +89,19 @@ class Encoder:
         feature_map_height, feature_map_width = self.feature_map_size
         default_boxes = torch.zeros(
             (
-                feature_map_height,
                 feature_map_width,
+                feature_map_height,
                 self.default_scalings.size(0),
                 NUM_BOX_PARAMETERS,
             )
         )
         for i, j in itertools.product(
-            range(feature_map_height), range(feature_map_width)
+            range(feature_map_width), range(feature_map_height)
         ):
             center = torch.tensor(
                 [
-                    (i + 0.5) / feature_map_height,
-                    (j + 0.5) / feature_map_width,
+                    (i + 0.5) / feature_map_width,
+                    (j + 0.5) / feature_map_height,
                 ]
             )
             if type == "xywh":
@@ -197,9 +210,7 @@ class TransformedDataset(torch.utils.data.Dataset):
         self.encoded_bounding_boxes = []
         self.encoded_object_classes = []
         self.target_masks = []
-        for i, (bounding_box, object_class) in enumerate(
-            zip(bounding_boxes, object_classes)
-        ):
+        for bounding_box, object_class in zip(bounding_boxes, object_classes):
             encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
                 bounding_box, object_class
             )
