@@ -1,4 +1,5 @@
 import os
+import itertools
 import shutil
 from typing import Tuple
 import torch
@@ -23,15 +24,15 @@ class Encoder:
         self.feature_map_size = feature_map_size
         self.num_classes = num_classes
         self.threshold = threshold
-        self.default_boxes_tr_bl = self._default_boxes_tl_br()
-        self.default_boxes_xy_wh = self._default_boxes_xy_wh()
+        self.default_boxes_tr_bl = self._default_boxes_("xywh")
+        self.default_boxes_xy_wh = self._default_boxes_("tlbr")
 
     def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor):
         NUM_BOX_PARAMETERS = 4
         # Transform bounding boxes from (cx, cy, w, h) to (x_top_left, y_top_left, x_bottom_right, y_bottom_right)
         target_boxes_tl_br = torch.zeros((target_boxes.size(0), 4))
-        target_boxes_tl_br[:, 0:2] = target_boxes[:, 0:2] - target_boxes[:, 3:4] / 2
-        target_boxes_tl_br[:, 2:4] = target_boxes[:, 0:2] + target_boxes[:, 3:4] / 2
+        target_boxes_tl_br[:, 0:2] = target_boxes[:, 0:2] - target_boxes[:, 2:4] / 2
+        target_boxes_tl_br[:, 2:4] = target_boxes[:, 0:2] + target_boxes[:, 2:4] / 2
         # Select the default box with the highest IoU and with IoU higher than the threshold value
         ious = calc_iou_tensor(target_boxes_tl_br, self.default_boxes_tr_bl)
         _, best_dbox_idx = ious.max(dim=1)
@@ -68,59 +69,36 @@ class Encoder:
         dbox_classes[mask_idx] = target_classes[best_idx[mask_idx]].flatten()
         return encoded_target_boxes, mask_idx, dbox_classes
 
-    def _default_boxes_tl_br(self):
-        NUM_BOX_PARAMETERS = 4
-        feature_map_height, feature_map_width = self.feature_map_size
-        default_boxes = torch.zeros(
-            (
-                feature_map_height * feature_map_width * self.default_scalings.size(0),
-                NUM_BOX_PARAMETERS,
-            )
-        )
-        for i in range(feature_map_height * feature_map_width):
-            selected_boxes_idx = range(
-                i * self.default_scalings.size(0),
-                (i + 1) * self.default_scalings.size(0),
-            )
-            idx_width = i % feature_map_width
-            idx_height = i // feature_map_width
-            top_left = torch.tensor(
-                [
-                    idx_width / feature_map_width,
-                    idx_height / feature_map_height,
-                ]
-            )
-            default_boxes[selected_boxes_idx, 0:2] = top_left
-            default_boxes[selected_boxes_idx, 2:4] = top_left + self.default_scalings
-        return default_boxes
 
-    def _default_boxes_xy_wh(self):
+    def _default_boxes(self, type):
+        assert type in ["xywh", "tlbr"]
         NUM_BOX_PARAMETERS = 4
         feature_map_height, feature_map_width = self.feature_map_size
         default_boxes = torch.zeros(
             (
-                feature_map_height * feature_map_width * self.default_scalings.size(0),
+                feature_map_height,
+                feature_map_width,
+                self.default_scalings.size(0),
                 NUM_BOX_PARAMETERS,
             )
         )
-        for i in range(feature_map_height * feature_map_width):
-            selected_boxes_idx = range(
-                i * self.default_scalings.size(0),
-                (i + 1) * self.default_scalings.size(0),
-            )
-            idx_width = i % feature_map_width
-            idx_height = i // feature_map_width
-            top_left = torch.tensor(
+        for i, j in itertools.product(
+            range(feature_map_height), range(feature_map_width)
+        ):
+            center = torch.tensor(
                 [
-                    idx_width / feature_map_width,
-                    idx_height / feature_map_height,
+                    (i + 0.5) / feature_map_height,
+                    (j + 0.5) / feature_map_width,
                 ]
             )
-            default_boxes[selected_boxes_idx, 0:2] = (
-                top_left + self.default_scalings / 2
-            )
-            default_boxes[selected_boxes_idx, 2:4] = self.default_scalings
-        return default_boxes
+            if type == "xywh":
+                default_boxes[i, j, :, 0:2] = center
+                default_boxes[i, j, :, 2:4] = self.default_scalings
+            else:
+                default_boxes[i, j, :, 0:2] = center - self.default_scalings / 2
+                default_boxes[i, j, :, 2:4] = center + self.default_scalings / 2
+
+        return default_boxes.reshape((-1, NUM_BOX_PARAMETERS))
 
     def decode_model_output(self, boxes, class_logits):
         """
