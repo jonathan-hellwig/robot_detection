@@ -4,18 +4,19 @@ from torchmetrics.classification import MulticlassAccuracy
 import torch.nn.functional as F
 import torch.optim as optim
 import pytorch_lightning as pl
+from object_detection_data import Encoder
 
 
 class MultiClassJetNet(pl.LightningModule):
-    def __init__(self, num_classes, num_scalings) -> None:
+    def __init__(self, encoder: Encoder) -> None:
         super().__init__()
-        self.num_classes = num_classes
-        self.num_scalings = num_scalings
-        self.feature_map_height = 8
-        self.feature_map_width = 10
+        self.encoder = encoder
+        assert encoder.feature_map_height == 8 and encoder.feature_map_width == 10
         NUM_BOX_PARAMETERS = 4
 
-        self.accuracy = MulticlassAccuracy(num_classes=num_classes + 1, average=None)
+        self.accuracy = MulticlassAccuracy(
+            num_classes=encoder.num_classes + 1, average=None
+        )
 
         self.batch_normalization_1 = nn.BatchNorm2d(1)
         self.conv2d_1 = nn.Conv2d(1, 16, 3, padding="same")
@@ -81,7 +82,8 @@ class MultiClassJetNet(pl.LightningModule):
         self.conv2d_13 = nn.Conv2d(24, 24, 3, padding="same")
         self.conv2d_14 = nn.Conv2d(
             24,
-            (self.num_classes + 1 + NUM_BOX_PARAMETERS) * self.num_scalings,
+            (self.encoder.num_classes + 1 + NUM_BOX_PARAMETERS)
+            * self.encoder.default_scalings.size(0),
             1,
             padding="same",
         )
@@ -138,40 +140,36 @@ class MultiClassJetNet(pl.LightningModule):
     def _format_model_output(self, output):
         # TODO: Extract the feature map size
         batch_size = output.size(0)
-        self.feature_map_height = 8
-        self.feature_map_width = 10
         NUM_BOX_PARAMETERS = 4
         output = output.permute((0, 2, 3, 1))
         output = output.reshape(
             (
                 -1,
-                self.feature_map_height,
-                self.feature_map_width,
-                self.num_scalings,
-                NUM_BOX_PARAMETERS + self.num_classes + 1,
+                self.encoder.feature_map_height,
+                self.encoder.feature_map_width,
+                self.encoder.default_scalings.size(0),
+                NUM_BOX_PARAMETERS + self.encoder.num_classes + 1,
             )
         )
         predicted_boxes = output[:, :, :, :, 0:NUM_BOX_PARAMETERS].reshape(
             (batch_size, -1, NUM_BOX_PARAMETERS)
         )
         predicted_class_logits = output[:, :, :, :, NUM_BOX_PARAMETERS:].reshape(
-            (-1, self.num_classes + 1)
+            (-1, self.encoder.num_classes + 1)
         )
         return predicted_boxes, predicted_class_logits
 
     def _decode_model_ouput(self, output):
-        self.feature_map_height = 8
-        self.feature_map_width = 10
         NUM_BOX_PARAMETERS = 4
 
         output = output.permute((0, 2, 3, 1))
         output = output.reshape(
             (
                 -1,
-                self.feature_map_height,
-                self.feature_map_width,
-                self.num_scalings,
-                NUM_BOX_PARAMETERS + self.num_classes + 1,
+                self.encoder.feature_map_height,
+                self.encoder.feature_map_width,
+                self.encoder.default_scalings.size(0),
+                NUM_BOX_PARAMETERS + self.encoder.num_classes + 1,
             )
         )
         return (

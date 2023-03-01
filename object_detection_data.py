@@ -21,7 +21,7 @@ class Encoder:
     ) -> None:
         # width x height
         self.default_scalings = default_scalings
-        self.feature_map_size = feature_map_size
+        self.feature_map_width, self.feature_map_height = feature_map_size
         self.num_classes = num_classes
         self.threshold = threshold
         self.default_boxes_tl_br = self._default_boxes("tlbr")
@@ -86,22 +86,21 @@ class Encoder:
     def _default_boxes(self, type):
         assert type in ["xywh", "tlbr"]
         NUM_BOX_PARAMETERS = 4
-        feature_map_height, feature_map_width = self.feature_map_size
         default_boxes = torch.zeros(
             (
-                feature_map_width,
-                feature_map_height,
+                self.feature_map_width,
+                self.feature_map_height,
                 self.default_scalings.size(0),
                 NUM_BOX_PARAMETERS,
             )
         )
         for i, j in itertools.product(
-            range(feature_map_width), range(feature_map_height)
+            range(self.feature_map_width), range(self.feature_map_height)
         ):
             center = torch.tensor(
                 [
-                    (i + 0.5) / feature_map_width,
-                    (j + 0.5) / feature_map_height,
+                    (i + 0.5) / self.feature_map_width,
+                    (j + 0.5) / self.feature_map_height,
                 ]
             )
             if type == "xywh":
