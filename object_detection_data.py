@@ -15,13 +15,12 @@ class Encoder:
     def __init__(
         self,
         default_scalings: torch.Tensor,
-        feature_map_size: Tuple[int, int],
         num_classes: int,
         threshold: float = 0.5,
     ) -> None:
         # width x height
         self.default_scalings = default_scalings
-        self.feature_map_width, self.feature_map_height = feature_map_size
+        self.feature_map_width, self.feature_map_height = (10, 8)
         self.num_classes = num_classes
         self.threshold = threshold
         self.default_boxes_tl_br = self._default_boxes("tlbr")
@@ -207,14 +206,14 @@ class TransformedDataset(torch.utils.data.Dataset):
         bounding_boxes = torch.load(data_path + "/target_bounding_boxes.pt")
         object_classes = torch.load(data_path + "/target_classes.pt")
         self.encoded_bounding_boxes = []
-        self.encoded_object_classes = []
+        self.encoded_target_classes = []
         self.target_masks = []
         for bounding_box, object_class in zip(bounding_boxes, object_classes):
             encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
                 bounding_box, object_class
             )
             self.encoded_bounding_boxes.append(encoded_bounding_boxes)
-            self.encoded_object_classes.append(target_classes)
+            self.encoded_target_classes.append(target_classes)
             self.target_masks.append(target_mask)
 
     def __getitem__(self, idx):
@@ -222,7 +221,7 @@ class TransformedDataset(torch.utils.data.Dataset):
             self.images[idx],
             self.encoded_bounding_boxes[idx],
             self.target_masks[idx],
-            self.encoded_object_classes[idx],
+            self.encoded_target_classes[idx],
             idx,
         )
 
