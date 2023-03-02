@@ -8,9 +8,10 @@ from object_detection_data import Encoder
 
 
 class MultiClassJetNet(pl.LightningModule):
-    def __init__(self, encoder: Encoder) -> None:
+    def __init__(self, encoder: Encoder, learning_rate: float) -> None:
         super().__init__()
         self.encoder = encoder
+        self.learning_rate = learning_rate
         assert encoder.feature_map_height == 8 and encoder.feature_map_width == 10
         NUM_BOX_PARAMETERS = 4
 
@@ -178,51 +179,86 @@ class MultiClassJetNet(pl.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
-        image, target_boxes, target_box_idx, target_classes = batch
-        predicted_boxes, object_class_logits = self(image)
-        selected_predicted_boxes = predicted_boxes[target_box_idx]
-        selected_target_boxes = target_boxes[target_box_idx]
-        # TODO: Check wether the permute operation gets handled correctly
+        image, target_boxes, target_masks, target_classes, _ = batch
+        predicted_boxes, predicted_class_logits = self(image)
+        mined_classification_loss, location_loss = self.loss(
+            target_boxes,
+            target_masks,
+            target_classes,
+            predicted_boxes,
+            predicted_class_logits,
+        )
+        acc = self.accuracy(predicted_class_logits, target_classes.flatten())
+        if self.encoder.num_classes == 4:
+            self.log("train_accuracy/no_box", acc[0])
+            self.log("train_accuracy/robot", acc[1])
+            self.log("train_accuracy/ball", acc[2])
+            self.log("train_accuracy/penalty", acc[3])
+            self.log("train_accuracy/goal_post", acc[4])
+        elif self.encoder.num_classes == 1:
+            self.log("train_accuracy/no_object", acc[0])
+            self.log("train_accuracy/object", acc[1])
+        self.log("train_loss/classification", mined_classification_loss)
+        self.log("train_loss/location", location_loss)
+        return mined_classification_loss + location_loss
+
+    def loss(
+        self,
+        target_boxes,
+        target_masks,
+        target_classes,
+        predicted_boxes,
+        predicted_class_logits,
+    ):
+        selected_predicted_boxes = predicted_boxes[target_masks]
+        selected_target_boxes = target_boxes[target_masks]
+        # TODO: Check whether the permute operation gets handled correctly
         # TODO: Handle the case when there is no box!
-        location_loss = F.smooth_l1_loss(
-            selected_predicted_boxes, selected_target_boxes
+        batch_size = predicted_boxes.size(0)
+        location_loss = (
+            F.smooth_l1_loss(
+                selected_predicted_boxes, selected_target_boxes, reduction="sum"
+            )
+            / batch_size
         )
-        classification_loss = F.cross_entropy(
-            object_class_logits,
+        number_of_positive = target_masks.sum()
+        classfication_loss = F.cross_entropy(
+            predicted_class_logits,
             target_classes.flatten(),
+            reduction="none",
         )
-        loss = location_loss + classification_loss
-        acc = self.accuracy(object_class_logits, target_classes.flatten())
-        self.log("train_accuracy/no_box", acc[0])
-        self.log("train_accuracy/robot", acc[1])
-        self.log("train_accuracy/ball", acc[2])
-        self.log("train_accuracy/penalty", acc[3])
-        self.log("train_accuracy/goal_post", acc[4])
-        self.log("train_loss", loss)
-        return loss
+        positive_classification_loss = classfication_loss[target_masks.flatten()]
+        negative_classification_loss = classfication_loss[~target_masks.flatten()]
+        sorted_loss, _ = negative_classification_loss.sort(descending=True)
+        number_of_negative = torch.clamp(
+            3 * number_of_positive, max=sorted_loss.size(0)
+        )
+        mined_classification_loss = (
+            sorted_loss[:number_of_negative].sum() + positive_classification_loss.sum()
+        ) / batch_size
+        # mined_classification_loss = positive_classification_loss.sum() / batch_size
+        total_loss = mined_classification_loss + location_loss
+        return mined_classification_loss, location_loss
 
     def validation_step(self, batch, batch_idx):
-        image, target_boxes, target_box_idx, target_classes = batch
-        predicted_boxes, object_class_logits = self(image)
-        selected_predicted_boxes = predicted_boxes[target_box_idx]
-        selected_target_boxes = target_boxes[target_box_idx]
-        # TODO: Check wether the permute operation gets handled correctly
-        # TODO: Handle the case when there is no box!
-        location_loss = F.smooth_l1_loss(
-            selected_predicted_boxes, selected_target_boxes
+        image, target_boxes, target_masks, target_classes, _ = batch
+        predicted_boxes, predicted_class_logits = self(image)
+        mined_classification_loss, location_loss = self.loss(
+            target_boxes,
+            target_masks,
+            target_classes,
+            predicted_boxes,
+            predicted_class_logits,
         )
-        classification_loss = F.cross_entropy(
-            object_class_logits, target_classes.flatten()
-        )
-        loss = location_loss + classification_loss
-        acc = self.accuracy(object_class_logits, target_classes.flatten())
+        acc = self.accuracy(predicted_class_logits, target_classes.flatten())
         self.log("val_accuracy/no_box", acc[0])
         self.log("val_accuracy/robot", acc[1])
         self.log("val_accuracy/ball", acc[2])
         self.log("val_accuracy/penalty", acc[3])
         self.log("val_accuracy/goal_post", acc[4])
-        self.log("val_loss", loss)
+        self.log("train_loss/classification", mined_classification_loss)
+        self.log("train_loss/location", location_loss)
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
