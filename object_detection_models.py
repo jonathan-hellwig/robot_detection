@@ -7,6 +7,56 @@ import pytorch_lightning as pl
 from object_detection_data import Encoder
 
 
+class DepthWise(nn.Module):
+    def __init__(self, in_channels, out_channels, use_stride=False) -> None:
+        super().__init__()
+        self.batch_normalization = nn.BatchNorm2d(in_channels)
+        if use_stride:
+            self.conv2d_1 = nn.Conv2d(
+                in_channels,
+                in_channels,
+                3,
+                stride=2,
+                groups=in_channels,
+                bias=False,
+                padding=1,
+            )
+        else:
+            self.conv2d_1 = nn.Conv2d(
+                in_channels,
+                in_channels,
+                3,
+                groups=in_channels,
+                bias=False,
+                padding="same",
+            )
+        self.conv2d_2 = nn.Conv2d(in_channels, out_channels, 1, padding="same")
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.batch_normalization(x)
+        x = self.conv2d_1(x)
+        x = self.conv2d_2(x)
+        x = self.relu(x)
+        return x
+
+
+class NormConv2dReLU(nn.Module):
+    def __init__(self, in_channels, out_channels) -> None:
+        super().__init__()
+        self.batch_normalization = nn.BatchNorm2d(in_channels)
+        self.conv2d = nn.Conv2d(
+            in_channels, out_channels, 3, bias=False, padding="same"
+        )
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.batch_normalization(x)
+        x = self.conv2d(x)
+        x = self.relu(x)
+        return x
+
+
 class MultiClassJetNet(pl.LightningModule):
     def __init__(self, encoder: Encoder, learning_rate: float) -> None:
         super().__init__()
@@ -18,70 +68,30 @@ class MultiClassJetNet(pl.LightningModule):
         self.accuracy = MulticlassAccuracy(
             num_classes=encoder.num_classes + 1, average=None
         )
+        self.block_channels = [[24, 16, 16, 20], [20, 20, 20, 20, 24]]
 
-        self.batch_normalization_1 = nn.BatchNorm2d(1)
-        self.conv2d_1 = nn.Conv2d(1, 16, 3, padding="same")
+        self.input_layer = NormConv2dReLU(1, 16)
 
-        self.batch_normalization_2 = nn.BatchNorm2d(16)
-        self.depthwise_conv2d_1 = nn.Conv2d(
-            16, 16, 3, stride=2, groups=16, bias=False, padding=1
-        )
-        self.conv2d_2 = nn.Conv2d(16, 24, 1, padding="same")
+        self.depth_wise_backbone = [DepthWise(16, 24, use_stride=True)]
+        for block_channel in self.block_channels:
+            for in_channels, out_channels in zip(
+                block_channel[:-2], block_channel[1:-1]
+            ):
+                self.depth_wise_backbone.append(DepthWise(in_channels, out_channels))
+            self.depth_wise_backbone.append(
+                DepthWise(block_channel[-2], block_channel[-1], use_stride=True)
+            )
+        self.depth_wise_backbone = nn.Sequential(*self.depth_wise_backbone)
 
-        self.batch_normalization_3 = nn.BatchNorm2d(24)
-        self.depthwise_conv2d_2 = nn.Conv2d(
-            24, 24, 3, groups=24, bias=False, padding="same"
-        )
-        self.conv2d_3 = nn.Conv2d(24, 16, 1, padding="same")
+        self.classifier_channels = [24, 24, 24, 24]
+        self.classifier = []
+        for classifier_channel in self.classifier_channels:
+            self.classifier.append(
+                NormConv2dReLU(classifier_channel, classifier_channel)
+            )
+        self.classifier = nn.Sequential(*self.classifier)
 
-        self.batch_normalization_4 = nn.BatchNorm2d(16)
-        self.depthwise_conv2d_3 = nn.Conv2d(
-            16, 16, 3, groups=16, bias=False, padding="same"
-        )
-        self.conv2d_4 = nn.Conv2d(16, 20, 1, padding="same")
-
-        self.batch_normalization_5 = nn.BatchNorm2d(20)
-        self.depthwise_conv2d_4 = nn.Conv2d(
-            20, 20, 3, stride=2, groups=20, bias=False, padding=1
-        )
-        self.conv2d_5 = nn.Conv2d(20, 20, 1, padding="same")
-
-        self.batch_normalization_6 = nn.BatchNorm2d(20)
-        self.depthwise_conv2d_5 = nn.Conv2d(
-            20, 20, 3, groups=20, bias=False, padding="same"
-        )
-        self.conv2d_6 = nn.Conv2d(20, 20, 1, padding="same")
-
-        self.batch_normalization_7 = nn.BatchNorm2d(20)
-        self.depthwise_conv2d_6 = nn.Conv2d(
-            20, 20, 3, groups=20, bias=False, padding="same"
-        )
-        self.conv2d_7 = nn.Conv2d(20, 20, 1, padding="same")
-
-        self.batch_normalization_8 = nn.BatchNorm2d(20)
-        self.depthwise_conv2d_7 = nn.Conv2d(
-            20, 20, 3, groups=20, bias=False, padding="same"
-        )
-        self.conv2d_8 = nn.Conv2d(20, 20, 1, padding="same")
-
-        self.batch_normalization_9 = nn.BatchNorm2d(20)
-        self.depthwise_conv2d_8 = nn.Conv2d(
-            20, 20, 3, stride=2, groups=20, bias=False, padding=1
-        )
-        self.conv2d_9 = nn.Conv2d(20, 24, 1, padding="same")
-
-        self.batch_normalization_10 = nn.BatchNorm2d(24)
-        self.conv2d_10 = nn.Conv2d(24, 24, 3, padding="same")
-
-        self.batch_normalization_11 = nn.BatchNorm2d(24)
-        self.conv2d_11 = nn.Conv2d(24, 24, 3, padding="same")
-
-        self.batch_normalization_12 = nn.BatchNorm2d(24)
-        self.conv2d_12 = nn.Conv2d(24, 24, 3, padding="same")
-
-        self.batch_normalization_13 = nn.BatchNorm2d(24)
-        self.conv2d_13 = nn.Conv2d(24, 24, 3, padding="same")
-        self.conv2d_14 = nn.Conv2d(
+        self.output_layer = nn.Conv2d(
             24,
             (self.encoder.num_classes + 1 + NUM_BOX_PARAMETERS)
             * self.encoder.default_scalings.size(0),
@@ -89,57 +99,14 @@ class MultiClassJetNet(pl.LightningModule):
             padding="same",
         )
 
-    def layers(self):
-        return [
-            self.batch_normalization_1,
-            self.conv2d_1,
-            self.batch_normalization_2,
-            self.depthwise_conv2d_1,
-            self.conv2d_2,
-            self.batch_normalization_3,
-            self.depthwise_conv2d_2,
-            self.conv2d_3,
-            self.batch_normalization_4,
-            self.depthwise_conv2d_3,
-            self.conv2d_4,
-            self.batch_normalization_5,
-            self.depthwise_conv2d_4,
-            self.conv2d_5,
-            self.batch_normalization_6,
-            self.depthwise_conv2d_5,
-            self.conv2d_6,
-            self.batch_normalization_7,
-            self.depthwise_conv2d_6,
-            self.conv2d_7,
-            self.batch_normalization_8,
-            self.depthwise_conv2d_7,
-            self.conv2d_8,
-            self.batch_normalization_9,
-            self.depthwise_conv2d_8,
-            self.conv2d_9,
-            self.batch_normalization_10,
-            self.conv2d_10,
-            self.batch_normalization_11,
-            self.conv2d_11,
-            self.batch_normalization_12,
-            self.conv2d_12,
-            self.batch_normalization_13,
-            self.conv2d_13,
-            self.conv2d_14,
-        ]
-
     def forward(self, x):
-        for layer in self.layers():
-            x = layer(x)
+        x = self.input_layer(x)
+        x = self.depth_wise_backbone(x)
+        x = self.classifier(x)
+        x = self.output_layer(x)
         return self._format_model_output(x)
 
-    def _forward(self, x):
-        for layer in self.layers():
-            x = layer(x)
-        return self._decode_model_ouput(x)
-
     def _format_model_output(self, output):
-        # TODO: Extract the feature map size
         batch_size = output.size(0)
         NUM_BOX_PARAMETERS = 4
         output = output.permute((0, 2, 3, 1))
