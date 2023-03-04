@@ -222,7 +222,6 @@ class TransformedDataset(torch.utils.data.Dataset):
             self.encoded_bounding_boxes[idx],
             self.target_masks[idx],
             self.encoded_target_classes[idx],
-            idx,
         )
 
     def __len__(self):

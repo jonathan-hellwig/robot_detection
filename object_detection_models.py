@@ -127,26 +127,8 @@ class MultiClassJetNet(pl.LightningModule):
         )
         return predicted_boxes, predicted_class_logits
 
-    def _decode_model_ouput(self, output):
-        NUM_BOX_PARAMETERS = 4
-
-        output = output.permute((0, 2, 3, 1))
-        output = output.reshape(
-            (
-                -1,
-                self.encoder.feature_map_height,
-                self.encoder.feature_map_width,
-                self.encoder.default_scalings.size(0),
-                NUM_BOX_PARAMETERS + self.encoder.num_classes + 1,
-            )
-        )
-        return (
-            output[:, :, :, :, 0:NUM_BOX_PARAMETERS],
-            output[:, :, :, :, NUM_BOX_PARAMETERS:],
-        )
-
     def training_step(self, batch, batch_idx):
-        image, target_boxes, target_masks, target_classes, _ = batch
+        image, target_boxes, target_masks, target_classes = batch
         predicted_boxes, predicted_class_logits = self(image)
         mined_classification_loss, location_loss = self.loss(
             target_boxes,
@@ -208,7 +190,7 @@ class MultiClassJetNet(pl.LightningModule):
         return mined_classification_loss, location_loss
 
     def validation_step(self, batch, batch_idx):
-        image, target_boxes, target_masks, target_classes, _ = batch
+        image, target_boxes, target_masks, target_classes = batch
         predicted_boxes, predicted_class_logits = self(image)
         mined_classification_loss, location_loss = self.loss(
             target_boxes,
