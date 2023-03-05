@@ -127,12 +127,17 @@ class Encoder:
         return decoded_boxes, class_probs
 
 
-def intersection_over_union(boxes_1, boxes_2):
-    """Calculation of IoU based on two boxes tensor,
-    Reference to https://github.com/kuangliu/pytorch-src
-    input:
-        box1 (N, 4)
-        box2 (M, 4)
+def intersection_over_union(
+    boxes_1: torch.Tensor, boxes_2: torch.Tensor
+) -> torch.Tensor:
+    """
+    Calculation of pairwise intersection over union metric based on two boxes tensor.
+    Reference: https://github.com/kuangliu/pytorch-src.
+
+    Paramters:
+        - boxes_1 with shape (N, 4)
+        - boxes_2 with shape (M, 4)
+
     output:
         IoU (N, M)
     """
@@ -143,10 +148,10 @@ def intersection_over_union(boxes_1, boxes_2):
     be2 = boxes_2.unsqueeze(0).expand(N, -1, -1)
 
     # Left Top & Right Bottom
-    lt = torch.max(be1[:, :, :2], be2[:, :, :2])
-    rb = torch.min(be1[:, :, 2:], be2[:, :, 2:])
+    top_left = torch.max(be1[:, :, :2], be2[:, :, :2])
+    bottom_right = torch.min(be1[:, :, 2:], be2[:, :, 2:])
 
-    delta = rb - lt
+    delta = bottom_right - top_left
     delta[delta < 0] = 0
     intersect = delta[:, :, 0] * delta[:, :, 1]
 
