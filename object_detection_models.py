@@ -137,16 +137,16 @@ class MultiClassJetNet(pl.LightningModule):
             predicted_boxes,
             predicted_class_logits,
         )
-        acc = self.accuracy(predicted_class_logits, target_classes.flatten())
+        accuracy = self.accuracy(predicted_class_logits, target_classes.flatten())
         if self.encoder.num_classes == 4:
-            self.log("train_accuracy/no_box", acc[0])
-            self.log("train_accuracy/robot", acc[1])
-            self.log("train_accuracy/ball", acc[2])
-            self.log("train_accuracy/penalty", acc[3])
-            self.log("train_accuracy/goal_post", acc[4])
+            self.log("train_accuracy/no_box", accuracy[0])
+            self.log("train_accuracy/robot", accuracy[1])
+            self.log("train_accuracy/ball", accuracy[2])
+            self.log("train_accuracy/penalty", accuracy[3])
+            self.log("train_accuracy/goal_post", accuracy[4])
         elif self.encoder.num_classes == 1:
-            self.log("train_accuracy/no_object", acc[0])
-            self.log("train_accuracy/object", acc[1])
+            self.log("train_accuracy/no_object", accuracy[0])
+            self.log("train_accuracy/object", accuracy[1])
         self.log("train_loss/classification", mined_classification_loss)
         self.log("train_loss/location", location_loss)
         return mined_classification_loss + location_loss
@@ -185,8 +185,6 @@ class MultiClassJetNet(pl.LightningModule):
         mined_classification_loss = (
             sorted_loss[:number_of_negative].sum() + positive_classification_loss.sum()
         ) / batch_size
-        # mined_classification_loss = positive_classification_loss.sum() / batch_size
-        total_loss = mined_classification_loss + location_loss
         return mined_classification_loss, location_loss
 
     def validation_step(self, batch, batch_idx):
@@ -199,12 +197,12 @@ class MultiClassJetNet(pl.LightningModule):
             predicted_boxes,
             predicted_class_logits,
         )
-        acc = self.accuracy(predicted_class_logits, target_classes.flatten())
-        self.log("val_accuracy/no_box", acc[0])
-        self.log("val_accuracy/robot", acc[1])
-        self.log("val_accuracy/ball", acc[2])
-        self.log("val_accuracy/penalty", acc[3])
-        self.log("val_accuracy/goal_post", acc[4])
+        accuracy = self.accuracy(predicted_class_logits, target_classes.flatten())
+        self.log("val_accuracy/no_box", accuracy[0])
+        self.log("val_accuracy/robot", accuracy[1])
+        self.log("val_accuracy/ball", accuracy[2])
+        self.log("val_accuracy/penalty", accuracy[3])
+        self.log("val_accuracy/goal_post", accuracy[4])
         self.log("train_loss/classification", mined_classification_loss)
         self.log("train_loss/location", location_loss)
 
