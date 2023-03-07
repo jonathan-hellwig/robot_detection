@@ -238,9 +238,6 @@ def mean_average_precision(
         + true_object_prediction_counts
     )
     object_precisions = true_object_prediction_counts / total_object_predicition_counts
-    target_classes[
-        target_is_object
-    ].shape, target_is_object.shape, matching_target_box_class.shape, true_object_prediction_correct_class.shape, true_object_prediction_counts
     mean_average_precision = object_precisions.mean()
     return mean_average_precision
 
