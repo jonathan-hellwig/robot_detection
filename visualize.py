@@ -2,6 +2,7 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 from PIL import ImageDraw, Image
 import torch
+import utils
 
 
 def tensor_to_pil(image, normalize):
@@ -17,7 +18,7 @@ def draw_bounding_box(image, bounding_boxes):
         w = int(bounding_boxes[i][2] * image.size[0])
         h = int(bounding_boxes[i][3] * image.size[1])
         xy = [cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2]
-        image_draw.rectangle(xy)
+        image_draw.rectangle(xy, fill=128)
     return image
 
 
@@ -32,20 +33,9 @@ def image_grid(imgs, rows, cols):
     return grid
 
 
-def draw_model_output(
-    image, predicted_boxes, predicted_class_logits, normalize, encoder
-):
-    class_probabilities = F.softmax(predicted_class_logits, dim=-1)
-    decoded_boxes = torch.zeros(predicted_boxes.shape)
-    decoded_boxes[:, :, 0:2] = encoder.default_boxes_xy_wh[:, 2:4] * (
-        encoder.default_boxes_xy_wh[:, 0:2] - predicted_boxes[:, :, 0:2]
-    )
-    decoded_boxes[:, :, 2:4] = encoder.default_boxes_xy_wh[:, 2:4] * torch.exp(
-        predicted_boxes[:, :, 2:4]
-    )
-    decoded_boxes = decoded_boxes.squeeze()
-    detection_mask = torch.argmax(class_probabilities, dim=-1) > 0
-    object_boxes = decoded_boxes[detection_mask]
+def draw_model_output(image, decoded_boxes, predicted_classes, normalize):
+    detection_is_object = predicted_classes > 0
+    object_boxes = decoded_boxes[detection_is_object]
 
     image = draw_bounding_box(tensor_to_pil(image, normalize), object_boxes)
     return image
