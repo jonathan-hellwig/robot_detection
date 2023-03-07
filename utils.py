@@ -179,3 +179,180 @@ def intersection_over_union(
 def calculate_predicted_classes(predicted_class_logits: torch.Tensor) -> torch.Tensor:
     class_probabilities = F.softmax(predicted_class_logits, dim=-1)
     return torch.argmax(class_probabilities, dim=-1)
+
+
+def count(input: torch.Tensor, num_classes: int) -> torch.Tensor:
+    augmented_counts = torch.zeros((num_classes,))
+    values, counts = torch.unique(input, return_counts=True)
+    assert values.size(0) <= num_classes
+    augmented_counts[values - 1] += counts
+    return augmented_counts
+
+
+def mean_average_precision(
+    predicted_boxes: torch.Tensor,
+    predicted_classes: torch.Tensor,
+    target: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    threshold: float,
+    num_classes: int,
+):
+    decoded_target_boxes, target_is_object, target_classes = target
+
+    prediction_is_object = predicted_classes > 0
+    object_boxes_tlbr = xywh_to_tlbr(predicted_boxes[prediction_is_object])
+    target_boxes_tlbr = xywh_to_tlbr(decoded_target_boxes[target_is_object])
+
+    overlap_score = intersection_over_union(object_boxes_tlbr, target_boxes_tlbr)
+    max_overlap_score, max_target_box_index = torch.max(overlap_score, dim=1)
+    prediction_matches_object = max_overlap_score > threshold
+
+    # Case 1. object detected, overlap below threshold
+    predicted_object_classes = predicted_classes[prediction_is_object]
+    false_object_predicition_no_overlap_counts = count(
+        predicted_object_classes[~prediction_matches_object], num_classes
+    )
+
+    # Case 2. object detected, overlap above theshold, correct_class
+    matching_target_box_class = target_classes[target_is_object][
+        max_target_box_index[prediction_matches_object]
+    ]
+    true_object_prediction_correct_class = (
+        predicted_object_classes[prediction_matches_object] == matching_target_box_class
+    )
+    true_object_prediction_counts = count(
+        predicted_object_classes[prediction_matches_object][
+            true_object_prediction_correct_class
+        ],
+        num_classes,
+    )
+    false_object_predicition_overlap_counts = count(
+        predicted_object_classes[prediction_matches_object][
+            ~true_object_prediction_correct_class
+        ],
+        num_classes,
+    )
+
+    total_object_predicition_counts = (
+        false_object_predicition_overlap_counts
+        + false_object_predicition_no_overlap_counts
+        + true_object_prediction_counts
+    )
+    object_precisions = true_object_prediction_counts / total_object_predicition_counts
+    target_classes[
+        target_is_object
+    ].shape, target_is_object.shape, matching_target_box_class.shape, true_object_prediction_correct_class.shape, true_object_prediction_counts
+    mean_average_precision = object_precisions.mean()
+    return mean_average_precision
+
+
+# Test case
+def equal_distribution():
+    num_classes = 3
+    # Predicted classes flat list of class label
+    predicted_classes = torch.tensor([0, 1, 2, 3])
+    # Predicted boxes in format (cx, cy, w, h)
+    predicted_boxes = torch.tensor(
+        [
+            [0.0, 0.0, 0.25, 0.25],
+            [0.75, 0.25, 0.25, 0.25],
+            [0.25, 0.75, 0.25, 0.25],
+            [0.75, 0.75, 0.25, 0.25],
+        ]
+    )
+
+    target_boxes = torch.tensor(
+        [
+            [0.0, 0.0, 0.25, 0.25],
+            [0.75, 0.25, 0.25, 0.25],
+            [0.25, 0.75, 0.25, 0.25],
+            [0.75, 0.75, 0.25, 0.25],
+        ]
+    )
+    target_is_object = torch.tensor([False, True, True, True])
+    target_classes = torch.tensor([0, 1, 2, 3])
+    target = (target_boxes, target_is_object, target_classes)
+    threshold = 0.0
+
+    result = mean_average_precision(
+        predicted_boxes, predicted_classes, target, threshold, num_classes
+    )
+    assert torch.allclose(result, torch.tensor([1.0, 1.0, 1.0]))
+
+
+# Test case
+def box_too_small():
+    num_classes = 3
+    # Predicted classes flat list of class label
+    predicted_classes = torch.tensor([0, 1, 2, 3])
+    # Predicted boxes in format (cx, cy, w, h)
+    predicted_boxes = torch.tensor(
+        [
+            [0.0, 0.0, 0.25, 0.25],
+            [0.75, 0.25, 0.05, 0.05],
+            [0.25, 0.75, 0.25, 0.25],
+            [0.75, 0.75, 0.25, 0.25],
+        ]
+    )
+
+    target_boxes = torch.tensor(
+        [
+            [0.0, 0.0, 0.25, 0.25],
+            [0.75, 0.25, 0.25, 0.25],
+            [0.25, 0.75, 0.25, 0.25],
+            [0.75, 0.75, 0.25, 0.25],
+        ]
+    )
+    target_is_object = torch.tensor([False, True, True, True])
+    target_classes = torch.tensor([0, 1, 2, 3])
+    target = (target_boxes, target_is_object, target_classes)
+    threshold = 0.5
+
+    result = mean_average_precision(
+        predicted_boxes, predicted_classes, target, threshold, num_classes
+    )
+    print(result)
+    assert torch.allclose(result, torch.tensor([0.0, 1.0, 1.0]))
+
+
+def not_equal():
+    """
+    Predicted boxes:
+    | 0 | 1/2 |
+    | 2 | 3 |
+
+    Target boxes:
+    | 0 | 1 |
+    | 2 | 3 |
+    """
+    num_classes = 3
+    # Predicted classes flat list of class label
+    predicted_classes = torch.tensor([0, 1, 2, 2, 3])
+    # Predicted boxes in format (cx, cy, w, h)
+    predicted_boxes = torch.tensor(
+        [
+            [0.0, 0.0, 0.25, 0.25],
+            [0.75, 0.25, 0.25, 0.25],
+            [0.75, 0.25, 0.25, 0.25],
+            [0.25, 0.75, 0.25, 0.25],
+            [0.75, 0.75, 0.25, 0.25],
+        ]
+    )
+
+    target_boxes = torch.tensor(
+        [
+            [0.0, 0.0, 0.25, 0.25],
+            [0.75, 0.25, 0.25, 0.25],
+            [0.25, 0.75, 0.25, 0.25],
+            [0.75, 0.75, 0.25, 0.25],
+        ]
+    )
+    target_is_object = torch.tensor([False, True, True, True])
+    target_classes = torch.tensor([0, 1, 2, 3])
+    target = (target_boxes, target_is_object, target_classes)
+    threshold = 0.0
+
+    result = mean_average_precision(
+        predicted_boxes, predicted_classes, target, threshold, num_classes
+    )
+    print(result)
+    assert torch.allclose(result, torch.tensor([1.0, 0.5, 1.0]))
