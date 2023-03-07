@@ -100,8 +100,9 @@ class Encoder:
         """
         assert predicted_boxes.dim() == 3
         decoded_boxes = torch.zeros_like(predicted_boxes)
-        decoded_boxes[:, :, 0:2] = self.default_boxes_xy_wh[:, 2:4] * (
-            self.default_boxes_xy_wh[:, 0:2] + predicted_boxes[:, :, 0:2]
+        decoded_boxes[:, :, 0:2] = (
+            self.default_boxes_xy_wh[:, 2:4] * (predicted_boxes[:, :, 0:2])
+            + self.default_boxes_xy_wh[:, 0:2]
         )
         decoded_boxes[:, :, 2:4] = self.default_boxes_xy_wh[:, 2:4] * torch.exp(
             predicted_boxes[:, :, 2:4]
@@ -111,7 +112,6 @@ class Encoder:
 
     def _default_boxes(self, type):
         assert type in ["xywh", "tlbr"]
-        NUM_BOX_PARAMETERS = 4
         default_boxes = torch.zeros(
             (
                 self.feature_map_width,
