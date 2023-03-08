@@ -90,15 +90,17 @@ class Encoder:
         )
         return encoded_target_boxes
 
-    def decode_bounding_boxes(self, predicted_boxes: torch.Tensor) -> torch.Tensor:
+    def decode_model_output(
+        self, predicted_boxes: torch.Tensor, encoded_predicted_classes: torch.Tensor
+    ) -> torch.Tensor:
         """
         Decode model output using the encoder. The decoded boxes are in (cx, cy, w, h) format.
 
         Prameters:
-        - encoder
         - predicted_boxes: raw model output with shape (batch_size, feature_map_width * feature_map_height, 4)
         """
         assert predicted_boxes.dim() == 3
+        prediction_is_object = encoded_predicted_classes > 0
         decoded_boxes = torch.zeros_like(predicted_boxes)
         decoded_boxes[:, :, 0:2] = (
             self.default_boxes_xy_wh[:, 2:4] * (predicted_boxes[:, :, 0:2])
@@ -107,8 +109,11 @@ class Encoder:
         decoded_boxes[:, :, 2:4] = self.default_boxes_xy_wh[:, 2:4] * torch.exp(
             predicted_boxes[:, :, 2:4]
         )
-
-        return decoded_boxes
+        decoded_boxes = decoded_boxes.reshape((-1, NUM_BOX_PARAMETERS))
+        return (
+            decoded_boxes[prediction_is_object],
+            encoded_predicted_classes[prediction_is_object],
+        )
 
     def _default_boxes(self, type):
         assert type in ["xywh", "tlbr"]
@@ -192,15 +197,14 @@ def count(input: torch.Tensor, num_classes: int) -> torch.Tensor:
 def mean_average_precision(
     predicted_boxes: torch.Tensor,
     predicted_classes: torch.Tensor,
-    target: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    decoded_target_boxes: torch.Tensor,
+    target_classes: torch.Tensor,
     threshold: float,
     num_classes: int,
 ):
-    decoded_target_boxes, target_is_object, target_classes = target
-
     prediction_is_object = predicted_classes > 0
     object_boxes_tlbr = xywh_to_tlbr(predicted_boxes[prediction_is_object])
-    target_boxes_tlbr = xywh_to_tlbr(decoded_target_boxes[target_is_object])
+    target_boxes_tlbr = xywh_to_tlbr(decoded_target_boxes)
 
     overlap_score = intersection_over_union(object_boxes_tlbr, target_boxes_tlbr)
     max_overlap_score, max_target_box_index = torch.max(overlap_score, dim=1)
@@ -213,7 +217,7 @@ def mean_average_precision(
     )
 
     # Case 2. object detected, overlap above theshold, correct_class
-    matching_target_box_class = target_classes[target_is_object][
+    matching_target_box_class = target_classes[
         max_target_box_index[prediction_matches_object]
     ]
     true_object_prediction_correct_class = (
