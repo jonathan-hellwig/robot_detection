@@ -1,14 +1,13 @@
 import os
-import itertools
 import shutil
-from typing import Tuple
 import torch
-import torch.nn.functional as F
 import numpy as np
 import tqdm
-from PIL import Image
+from PIL import Image, ImageDraw
 import torchvision
 import torchvision.transforms as T
+
+
 from utils import Encoder
 
 
@@ -78,7 +77,70 @@ class TransformedDataset(torch.utils.data.Dataset):
         )
 
     def __len__(self):
-        return len(self.images)
+        return len(self.encoded_bounding_boxes)
+
+
+class SyntheticData(torch.utils.data.Dataset):
+    def __init__(self, image_width, image_height, length, encoder):
+        self.image_width = image_width
+        self.image_height = image_height
+        self.length = length
+        self.encoder = encoder
+
+        self.images = []
+        self.encoded_bounding_boxes = []
+        self.encoded_target_classes = []
+        self.target_masks = []
+        for _ in range(length):
+            image, bounding_box = self._generate_image()
+            encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
+                bounding_box, torch.tensor([[1]])
+            )
+            self.images.append(image)
+            self.encoded_bounding_boxes.append(encoded_bounding_boxes)
+            self.encoded_target_classes.append(target_classes)
+            self.target_masks.append(target_mask)
+
+    def __getitem__(self, idx):
+        return (
+            self.images[idx],
+            self.encoded_bounding_boxes[idx],
+            self.target_masks[idx],
+            self.encoded_target_classes[idx],
+        )
+
+    def __len__(self) -> int:
+        return self.length
+
+    def _generate_image(self):
+        image = Image.new("1", (self.image_width, self.image_height))
+        image_draw = ImageDraw.Draw(image)
+        center = torch.tensor(
+            [
+                torch.randint(0, self.image_width - 1, (1,)).item(),
+                torch.randint(0, self.image_height - 1, (1,)).item(),
+            ]
+        )
+        size = torch.tensor([self.image_width * 0.25, self.image_height * 0.25])
+        upper_left = center - size / 2
+        lower_right = center + size / 2
+        image_draw.rectangle(
+            [upper_left[0], upper_left[1], lower_right[0], lower_right[1]], fill=255
+        )
+        bounding_box = torch.tensor(
+            [
+                [
+                    center[0].item() / self.image_width,
+                    center[1].item() / self.image_height,
+                    size[0].item() / self.image_width,
+                    size[1].item() / self.image_height,
+                ]
+            ]
+        )
+        return (
+            torchvision.transforms.functional.pil_to_tensor(image).to(torch.float),
+            bounding_box,
+        )
 
 
 def calculate_mean_std(dataset: ObjectDetectionDataset):
