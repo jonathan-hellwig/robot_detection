@@ -6,6 +6,8 @@ import torch.optim as optim
 import pytorch_lightning as pl
 from object_detection_data import Encoder
 
+import utils
+
 
 class DepthWise(nn.Module):
     def __init__(self, in_channels, out_channels, use_stride=False) -> None:
@@ -60,6 +62,7 @@ class NormConv2dReLU(nn.Module):
 class MultiClassJetNet(pl.LightningModule):
     def __init__(self, encoder: Encoder, learning_rate: float) -> None:
         super().__init__()
+        self.threshold = 0.5
         self.encoder = encoder
         self.learning_rate = learning_rate
         assert encoder.feature_map_height == 8 and encoder.feature_map_width == 10
@@ -128,83 +131,125 @@ class MultiClassJetNet(pl.LightningModule):
         return predicted_boxes, predicted_class_logits
 
     def training_step(self, batch, batch_idx):
-        image, target_boxes, target_masks, target_classes = batch
-        predicted_boxes, predicted_class_logits = self(image)
+        image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
+        encoded_predicted_boxes, predicted_class_logits = self(image)
         mined_classification_loss, location_loss = self.loss(
-            target_boxes,
-            target_masks,
-            target_classes,
-            predicted_boxes,
+            encoded_target_boxes,
+            target_is_object,
+            encoded_target_classes,
+            encoded_predicted_boxes,
             predicted_class_logits,
         )
-        accuracy = self.accuracy(predicted_class_logits, target_classes.flatten())
+        encoded_predicted_classes = utils.calculate_predicted_classes(
+            predicted_class_logits
+        )
+        predicted_boxes, predicted_classes = self.encoder.decode_model_output(
+            encoded_predicted_boxes, encoded_predicted_classes
+        )
+        target_boxes, target_classes = self.encoder.decode_model_output(
+            encoded_target_boxes, encoded_target_classes.flatten()
+        )
+
+        mean_average_precision = utils.mean_average_precision(
+            predicted_boxes,
+            predicted_classes,
+            target_boxes,
+            target_classes,
+            self.threshold,
+            self.encoder.num_classes,
+        )
+        accuracy = self.accuracy(
+            predicted_class_logits, encoded_target_classes.flatten()
+        )
         if self.encoder.num_classes == 4:
-            self.log("train_accuracy/no_box", accuracy[0])
-            self.log("train_accuracy/robot", accuracy[1])
-            self.log("train_accuracy/ball", accuracy[2])
-            self.log("train_accuracy/penalty", accuracy[3])
-            self.log("train_accuracy/goal_post", accuracy[4])
+            self.log("train/accuracy/no_box", accuracy[0])
+            self.log("train/accuracy/robot", accuracy[1])
+            self.log("train/accuracy/ball", accuracy[2])
+            self.log("train/accuracy/penalty", accuracy[3])
+            self.log("train/accuracy/goal_post", accuracy[4])
         elif self.encoder.num_classes == 1:
-            self.log("train_accuracy/no_object", accuracy[0])
-            self.log("train_accuracy/object", accuracy[1])
-        self.log("train_loss/classification", mined_classification_loss)
-        self.log("train_loss/location", location_loss)
+            self.log("train/accuracy/no_object", accuracy[0])
+            self.log("train/accuracy/object", accuracy[1])
+        self.log("train/loss/classification", mined_classification_loss)
+        self.log("train/loss/location", location_loss)
+        self.log("train/mean_average_precision", mean_average_precision)
         return mined_classification_loss + location_loss
 
     def loss(
         self,
         target_boxes,
-        target_masks,
+        target_is_object,
         target_classes,
         predicted_boxes,
         predicted_class_logits,
     ):
-        selected_predicted_boxes = predicted_boxes[target_masks]
-        selected_target_boxes = target_boxes[target_masks]
+        selected_predicted_boxes = predicted_boxes[target_is_object]
+        selected_target_boxes = target_boxes[target_is_object]
         # TODO: Check whether the permute operation gets handled correctly
         # TODO: Handle the case when there is no box!
-        batch_size = predicted_boxes.size(0)
-        location_loss = (
-            F.smooth_l1_loss(
-                selected_predicted_boxes, selected_target_boxes, reduction="sum"
-            )
-            / batch_size
-        )
-        number_of_positive = target_masks.sum()
+        location_loss = F.smooth_l1_loss(
+            selected_predicted_boxes, selected_target_boxes, reduction="sum"
+        ) / selected_predicted_boxes.size(0)
+        number_of_positive = target_is_object.sum()
         classfication_loss = F.cross_entropy(
             predicted_class_logits,
             target_classes.flatten(),
             reduction="none",
         )
-        positive_classification_loss = classfication_loss[target_masks.flatten()]
-        negative_classification_loss = classfication_loss[~target_masks.flatten()]
+        positive_classification_loss = classfication_loss[target_is_object.flatten()]
+        negative_classification_loss = classfication_loss[~target_is_object.flatten()]
         sorted_loss, _ = negative_classification_loss.sort(descending=True)
         number_of_negative = torch.clamp(
             3 * number_of_positive, max=sorted_loss.size(0)
         )
         mined_classification_loss = (
             sorted_loss[:number_of_negative].sum() + positive_classification_loss.sum()
-        ) / batch_size
+        ) / (number_of_negative + number_of_positive)
         return mined_classification_loss, location_loss
 
     def validation_step(self, batch, batch_idx):
-        image, target_boxes, target_masks, target_classes = batch
-        predicted_boxes, predicted_class_logits = self(image)
+        image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
+        encoded_predicted_boxes, predicted_class_logits = self(image)
         mined_classification_loss, location_loss = self.loss(
-            target_boxes,
-            target_masks,
-            target_classes,
-            predicted_boxes,
+            encoded_target_boxes,
+            target_is_object,
+            encoded_target_classes,
+            encoded_predicted_boxes,
             predicted_class_logits,
         )
-        accuracy = self.accuracy(predicted_class_logits, target_classes.flatten())
-        self.log("val_accuracy/no_box", accuracy[0])
-        self.log("val_accuracy/robot", accuracy[1])
-        self.log("val_accuracy/ball", accuracy[2])
-        self.log("val_accuracy/penalty", accuracy[3])
-        self.log("val_accuracy/goal_post", accuracy[4])
-        self.log("train_loss/classification", mined_classification_loss)
-        self.log("train_loss/location", location_loss)
+        encoded_predicted_classes = utils.calculate_predicted_classes(
+            predicted_class_logits
+        )
+        predicted_boxes, predicted_classes = self.encoder.decode_model_output(
+            encoded_predicted_boxes, encoded_predicted_classes
+        )
+        target_boxes, target_classes = self.encoder.decode_model_output(
+            encoded_target_boxes, encoded_target_classes.flatten()
+        )
+
+        mean_average_precision = utils.mean_average_precision(
+            predicted_boxes,
+            predicted_classes,
+            target_boxes,
+            target_classes,
+            self.threshold,
+            self.encoder.num_classes,
+        )
+        accuracy = self.accuracy(
+            predicted_class_logits, encoded_target_classes.flatten()
+        )
+        if self.encoder.num_classes == 4:
+            self.log("val/accuracy/no_box", accuracy[0])
+            self.log("val/accuracy/robot", accuracy[1])
+            self.log("val/accuracy/ball", accuracy[2])
+            self.log("val/accuracy/penalty", accuracy[3])
+            self.log("val/accuracy/goal_post", accuracy[4])
+        elif self.encoder.num_classes == 1:
+            self.log("val/accuracy/no_object", accuracy[0])
+            self.log("val/accuracy/object", accuracy[1])
+        self.log("val/loss/classification", mined_classification_loss)
+        self.log("val/loss/location", location_loss)
+        self.log("val/mean_average_precision", mean_average_precision)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
