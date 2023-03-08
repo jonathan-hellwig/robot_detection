@@ -5,6 +5,22 @@ import torch
 NUM_BOX_PARAMETERS: int = 4
 
 
+def scalings(
+    square_scaling,
+    rectangular_scaling,
+    number_of_square_scalings,
+    number_of_rectangular_scalings,
+):
+    return torch.row_stack(
+        (
+            square_scaling
+            / (1.4 ** torch.arange(0, number_of_square_scalings).unsqueeze(1)),
+            rectangular_scaling
+            / (1.4 ** torch.arange(0, number_of_rectangular_scalings)).unsqueeze(1),
+        )
+    )
+
+
 def xywh_to_tlbr(xywh_bounding_boxes: torch.Tensor) -> torch.Tensor:
     """
     Convert bounding boxes from (cx, cy, w, h) format to (top_left_x, top_left_y, bottom_right_x, bottom_right_y) format.
