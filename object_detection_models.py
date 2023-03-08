@@ -62,6 +62,7 @@ class NormConv2dReLU(nn.Module):
 class MultiClassJetNet(pl.LightningModule):
     def __init__(self, encoder: Encoder, learning_rate: float) -> None:
         super().__init__()
+        self.mean_average_precisions = []
         self.threshold = 0.5
         self.encoder = encoder
         self.learning_rate = learning_rate
@@ -140,27 +141,27 @@ class MultiClassJetNet(pl.LightningModule):
             encoded_predicted_boxes,
             predicted_class_logits,
         )
-        encoded_predicted_classes = utils.calculate_predicted_classes(
-            predicted_class_logits
-        )
-        predicted_boxes, predicted_classes = self.encoder.decode_model_output(
-            encoded_predicted_boxes, encoded_predicted_classes
-        )
-        target_boxes, target_classes = self.encoder.decode_model_output(
-            encoded_target_boxes, encoded_target_classes.flatten()
-        )
-
-        mean_average_precision = utils.mean_average_precision(
-            predicted_boxes,
-            predicted_classes,
-            target_boxes,
-            target_classes,
-            self.threshold,
-            self.encoder.num_classes,
-        )
-        accuracy = self.accuracy(
-            predicted_class_logits, encoded_target_classes.flatten()
-        )
+        with torch.no_grad():
+            encoded_predicted_classes = utils.calculate_predicted_classes(
+                predicted_class_logits
+            )
+            predicted_boxes, predicted_classes = self.encoder.decode_model_output(
+                encoded_predicted_boxes, encoded_predicted_classes
+            )
+            target_boxes, target_classes = self.encoder.decode_model_output(
+                encoded_target_boxes, encoded_target_classes.flatten()
+            )
+            mean_average_precision = utils.mean_average_precision(
+                predicted_boxes,
+                predicted_classes,
+                target_boxes,
+                target_classes,
+                self.threshold,
+                self.encoder.num_classes,
+            )
+            accuracy = self.accuracy(
+                predicted_class_logits, encoded_target_classes.flatten()
+            )
         if self.encoder.num_classes == 4:
             self.log("train/accuracy/no_box", accuracy[0])
             self.log("train/accuracy/robot", accuracy[1])
@@ -217,27 +218,30 @@ class MultiClassJetNet(pl.LightningModule):
             encoded_predicted_boxes,
             predicted_class_logits,
         )
-        encoded_predicted_classes = utils.calculate_predicted_classes(
-            predicted_class_logits
-        )
-        predicted_boxes, predicted_classes = self.encoder.decode_model_output(
-            encoded_predicted_boxes, encoded_predicted_classes
-        )
-        target_boxes, target_classes = self.encoder.decode_model_output(
-            encoded_target_boxes, encoded_target_classes.flatten()
-        )
-
-        mean_average_precision = utils.mean_average_precision(
-            predicted_boxes,
-            predicted_classes,
-            target_boxes,
-            target_classes,
-            self.threshold,
-            self.encoder.num_classes,
-        )
-        accuracy = self.accuracy(
-            predicted_class_logits, encoded_target_classes.flatten()
-        )
+        with torch.no_grad():
+            encoded_predicted_classes = utils.calculate_predicted_classes(
+                predicted_class_logits
+            )
+            predicted_boxes, predicted_classes = self.encoder.decode_model_output(
+                encoded_predicted_boxes, encoded_predicted_classes
+            )
+            target_boxes, target_classes = self.encoder.decode_model_output(
+                encoded_target_boxes, encoded_target_classes.flatten()
+            )
+            mean_average_precision = utils.mean_average_precision(
+                predicted_boxes,
+                predicted_classes,
+                target_boxes,
+                target_classes,
+                self.threshold,
+                self.encoder.num_classes,
+            )
+            accuracy = self.accuracy(
+                predicted_class_logits, encoded_target_classes.flatten()
+            )
+            self.mean_average_precisions.append(
+                torch.nan_to_num(mean_average_precision)
+            )
         if self.encoder.num_classes == 4:
             self.log("val/accuracy/no_box", accuracy[0])
             self.log("val/accuracy/robot", accuracy[1])
