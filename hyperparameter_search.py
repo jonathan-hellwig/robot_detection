@@ -44,13 +44,13 @@ def train_network(config, seed=0):
         transformed_train_data,
         batch_size=config["batch_size"],
         shuffle=True,
-        num_workers=0,
+        num_workers=4,
     )
     val_loader = DataLoader(
         transformed_val_data,
         batch_size=config["batch_size"],
         shuffle=False,
-        num_workers=0,
+        num_workers=4,
     )
 
     pl_model = MultiClassJetNet(encoder, config["learning_rate"])
