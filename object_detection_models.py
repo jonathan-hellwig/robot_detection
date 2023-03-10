@@ -186,12 +186,17 @@ class MultiClassJetNet(pl.LightningModule):
     ):
         selected_predicted_boxes = predicted_boxes[target_is_object]
         selected_target_boxes = target_boxes[target_is_object]
-        # TODO: Check whether the permute operation gets handled correctly
-        # TODO: Handle the case when there is no box!
-        location_loss = F.smooth_l1_loss(
-            selected_predicted_boxes, selected_target_boxes, reduction="sum"
-        ) / selected_predicted_boxes.size(0)
-        number_of_positive = target_is_object.sum()
+        number_of_positive = selected_predicted_boxes.size(0)
+        if number_of_positive > 0:
+            location_loss = (
+                F.smooth_l1_loss(
+                    selected_predicted_boxes, selected_target_boxes, reduction="sum"
+                )
+                / number_of_positive
+            )
+        else:
+            location_loss = 0.0
+
         classfication_loss = F.cross_entropy(
             predicted_class_logits,
             target_classes.flatten(),
@@ -201,7 +206,7 @@ class MultiClassJetNet(pl.LightningModule):
         negative_classification_loss = classfication_loss[~target_is_object.flatten()]
         sorted_loss, _ = negative_classification_loss.sort(descending=True)
         number_of_negative = torch.clamp(
-            3 * number_of_positive, max=sorted_loss.size(0)
+            torch.tensor(3 * number_of_positive), max=sorted_loss.size(0)
         )
         mined_classification_loss = (
             sorted_loss[:number_of_negative].sum() + positive_classification_loss.sum()
