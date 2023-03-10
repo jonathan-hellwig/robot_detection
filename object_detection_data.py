@@ -22,7 +22,7 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
         self.labels = sorted(os.listdir(data_path + "/labels/"))
 
     def __getitem__(self, idx):
-        # Check if paths are equal
+        assert self.images[idx][:-3] == self.labels[idx][:-3]
         image_path = self.data_path + "/images/" + self.images[idx]
         label_path = self.data_path + "/labels/" + self.labels[idx]
         image = Image.open(image_path)
@@ -51,8 +51,16 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
         return len(self.images)
 
 
+def index_to_class(index):
+    return ["no_object", "robot", "ball", "penalty_spot", "goal_post"][index]
+
+
 class TransformedDataset(torch.utils.data.Dataset):
-    def __init__(self, data_path: str, encoder: Encoder) -> None:
+    def __init__(
+        self,
+        data_path: str,
+        encoder: Encoder,
+    ) -> None:
         self.encoder = encoder
         self.images = torch.load(data_path + "/transformed_images.pt")
         bounding_boxes = torch.load(data_path + "/target_bounding_boxes.pt")
@@ -61,6 +69,15 @@ class TransformedDataset(torch.utils.data.Dataset):
         self.encoded_target_classes = []
         self.target_masks = []
         for bounding_box, object_class in zip(bounding_boxes, object_classes):
+            included_indices = []
+            for i in range(object_class.size(0)):
+                if index_to_class(object_class[i]) in encoder.classes:
+                    included_indices.append(True)
+                else:
+                    included_indices.append(False)
+            included_indices = torch.tensor(included_indices)
+            bounding_box = bounding_box[included_indices]
+            object_class = object_class[included_indices]
             encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
                 bounding_box, object_class
             )

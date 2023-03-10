@@ -43,20 +43,26 @@ class Encoder:
     def __init__(
         self,
         default_scalings: torch.Tensor,
-        num_classes: int,
+        classes=["robot", "ball", "penalty_spot", "goal_post"],
         threshold: float = 0.5,
     ) -> None:
-        # width x height
+        assert classes <= ["robot", "ball", "penalty_spot", "goal_post"]
         self.default_scalings = default_scalings
         self.feature_map_width, self.feature_map_height = (10, 8)
-        self.num_classes = num_classes
+        self.classes = classes
+        self.num_classes = len(classes)
         self.threshold = threshold
         self.default_boxes_tl_br = self._default_boxes("tlbr")
         self.default_boxes_xy_wh = self._default_boxes("xywh")
 
     def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor):
-        # Transform bounding boxes from (cx, cy, w, h) to (x_top_left, y_top_left, x_bottom_right, y_bottom_right)
-        # TODO: Reduce an error source by refactoring this section
+        if target_boxes.size(0) == 0:
+            num_default_boxes = self.default_boxes_xy_wh.size(0)
+            return (
+                torch.zeros((num_default_boxes, NUM_BOX_PARAMETERS)),
+                torch.zeros((num_default_boxes,), dtype=torch.bool),
+                torch.zeros(num_default_boxes, dtype=torch.long),
+            )
         target_boxes_tl_br = xywh_to_tlbr(target_boxes)
         # Select the default box with the highest IoU and with IoU higher than the threshold value
         ious = intersection_over_union(target_boxes_tl_br, self.default_boxes_tl_br)
