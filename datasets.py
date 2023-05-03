@@ -52,7 +52,14 @@ class ObjectDetectionDataset(torch.utils.data.Dataset):
 
 
 def index_to_class(index):
-    return ["no_object", "robot", "ball", "penalty_spot", "goal_post"][index]
+    return ["no_object", "ball", "robot", "penalty_spot", "goal_post"][index]
+
+
+def index_to_updated_index(index, classes):
+    updated_index = torch.zeros_like(index)
+    for i in range(index.size(0)):
+        updated_index[i] = classes.index(index_to_class(index[i])) + 1
+    return updated_index
 
 
 class TransformedDataset(torch.utils.data.Dataset):
@@ -62,28 +69,34 @@ class TransformedDataset(torch.utils.data.Dataset):
         encoder: Encoder,
     ) -> None:
         self.encoder = encoder
-        self.images = torch.load(data_path + "/transformed_images.pt")
+        loaded_images = torch.load(data_path + "/transformed_images.pt")
         bounding_boxes = torch.load(data_path + "/target_bounding_boxes.pt")
         object_classes = torch.load(data_path + "/target_classes.pt")
+        self.images = []
         self.encoded_bounding_boxes = []
         self.encoded_target_classes = []
         self.target_masks = []
-        for bounding_box, object_class in zip(bounding_boxes, object_classes):
-            included_indices = []
-            for i in range(object_class.size(0)):
-                if index_to_class(object_class[i]) in encoder.classes:
-                    included_indices.append(True)
-                else:
-                    included_indices.append(False)
-            included_indices = torch.tensor(included_indices)
-            bounding_box = bounding_box[included_indices]
-            object_class = object_class[included_indices]
-            encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
-                bounding_box, object_class
-            )
-            self.encoded_bounding_boxes.append(encoded_bounding_boxes)
-            self.encoded_target_classes.append(target_classes)
-            self.target_masks.append(target_mask)
+        for bounding_box, object_class, image in zip(
+            bounding_boxes, object_classes, loaded_images
+        ):
+            is_selected_object_class = [
+                index_to_class(c) in encoder.classes for c in object_class
+            ]
+            if any(is_selected_object_class):
+                is_selected_object_class = torch.tensor(is_selected_object_class)
+                bounding_box = bounding_box[is_selected_object_class]
+                object_class = index_to_updated_index(
+                    object_class[is_selected_object_class], encoder.classes
+                )
+                (
+                    encoded_bounding_boxes,
+                    target_mask,
+                    target_classes,
+                ) = self.encoder.apply(bounding_box, object_class)
+                self.encoded_bounding_boxes.append(encoded_bounding_boxes)
+                self.encoded_target_classes.append(target_classes)
+                self.target_masks.append(target_mask)
+                self.images.append(image)
 
     def __getitem__(self, idx):
         return (
@@ -99,6 +112,7 @@ class TransformedDataset(torch.utils.data.Dataset):
 
 class SyntheticData(torch.utils.data.Dataset):
     def __init__(self, image_width, image_height, length, encoder):
+        print('Generating synthetic data...')
         self.image_width = image_width
         self.image_height = image_height
         self.length = length
@@ -117,6 +131,7 @@ class SyntheticData(torch.utils.data.Dataset):
             self.encoded_bounding_boxes.append(encoded_bounding_boxes)
             self.encoded_target_classes.append(target_classes)
             self.target_masks.append(target_mask)
+        print('Done!')
 
     def __getitem__(self, idx):
         return (
