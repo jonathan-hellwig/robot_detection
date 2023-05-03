@@ -4,7 +4,6 @@ from torchmetrics.classification import MulticlassAccuracy
 import torch.nn.functional as F
 import torch.optim as optim
 import pytorch_lightning as pl
-from object_detection_data import Encoder
 
 import utils
 
@@ -60,7 +59,7 @@ class NormConv2dReLU(nn.Module):
 
 
 class MultiClassJetNet(pl.LightningModule):
-    def __init__(self, encoder: Encoder, learning_rate: float) -> None:
+    def __init__(self, encoder: utils.Encoder, learning_rate: float) -> None:
         super().__init__()
         self.mean_average_precisions = []
         self.threshold = 0.5
@@ -111,6 +110,7 @@ class MultiClassJetNet(pl.LightningModule):
         return self._format_model_output(x)
 
     def _format_model_output(self, output):
+        """ """
         batch_size = output.size(0)
         NUM_BOX_PARAMETERS = 4
         output = output.permute((0, 2, 3, 1))
@@ -145,17 +145,25 @@ class MultiClassJetNet(pl.LightningModule):
             encoded_predicted_classes = utils.calculate_predicted_classes(
                 predicted_class_logits
             )
-            predicted_boxes, predicted_classes = self.encoder.decode_model_output(
+            (
+                predicted_boxes,
+                predicted_classes,
+                prediction_is_object,
+            ) = self.encoder.decode_model_output(
                 encoded_predicted_boxes, encoded_predicted_classes
             )
-            target_boxes, target_classes = self.encoder.decode_model_output(
+            (
+                target_boxes,
+                target_classes,
+                _,
+            ) = self.encoder.decode_model_output(
                 encoded_target_boxes, encoded_target_classes.flatten()
             )
             mean_average_precision = utils.mean_average_precision(
-                predicted_boxes,
-                predicted_classes,
-                target_boxes,
-                target_classes,
+                predicted_boxes[prediction_is_object],
+                predicted_classes[prediction_is_object],
+                target_boxes[target_is_object.flatten()],
+                target_classes[target_is_object.flatten()],
                 self.threshold,
                 self.encoder.num_classes,
             )
@@ -227,17 +235,25 @@ class MultiClassJetNet(pl.LightningModule):
             encoded_predicted_classes = utils.calculate_predicted_classes(
                 predicted_class_logits
             )
-            predicted_boxes, predicted_classes = self.encoder.decode_model_output(
+            (
+                predicted_boxes,
+                predicted_classes,
+                prediction_is_object,
+            ) = self.encoder.decode_model_output(
                 encoded_predicted_boxes, encoded_predicted_classes
             )
-            target_boxes, target_classes = self.encoder.decode_model_output(
+            (
+                target_boxes,
+                target_classes,
+                _,
+            ) = self.encoder.decode_model_output(
                 encoded_target_boxes, encoded_target_classes.flatten()
             )
             mean_average_precision = utils.mean_average_precision(
-                predicted_boxes,
-                predicted_classes,
-                target_boxes,
-                target_classes,
+                predicted_boxes[prediction_is_object],
+                predicted_classes[prediction_is_object],
+                target_boxes[target_is_object.flatten()],
+                target_classes[target_is_object.flatten()],
                 self.threshold,
                 self.encoder.num_classes,
             )
@@ -254,6 +270,7 @@ class MultiClassJetNet(pl.LightningModule):
             self.log("val/accuracy/penalty", accuracy[3])
             self.log("val/accuracy/goal_post", accuracy[4])
         elif self.encoder.num_classes == 1:
+            print(accuracy)
             self.log("val/accuracy/no_object", accuracy[0])
             self.log("val/accuracy/object", accuracy[1])
         self.log("val/loss/classification", mined_classification_loss)
