@@ -110,7 +110,9 @@ class MultiClassJetNet(pl.LightningModule):
         return self._format_model_output(x)
 
     def _format_model_output(self, output):
-        """ """
+        """
+        output: (batch_size, num_anchors, num_classes + 1 + 4)
+        """
         batch_size = output.size(0)
         NUM_BOX_PARAMETERS = 4
         output = output.permute((0, 2, 3, 1))
@@ -131,10 +133,10 @@ class MultiClassJetNet(pl.LightningModule):
         )
         return predicted_boxes, predicted_class_logits
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, _):
         image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
         encoded_predicted_boxes, predicted_class_logits = self(image)
-        mined_classification_loss, location_loss = self.loss(
+        mined_classification_loss, location_loss = self.bounding_box_loss(
             encoded_target_boxes,
             target_is_object,
             encoded_target_classes,
@@ -142,49 +144,20 @@ class MultiClassJetNet(pl.LightningModule):
             predicted_class_logits,
         )
         with torch.no_grad():
-            encoded_predicted_classes = utils.calculate_predicted_classes(
-                predicted_class_logits
-            )
-            (
-                predicted_boxes,
-                predicted_classes,
-                prediction_is_object,
-            ) = self.encoder.decode_model_output(
-                encoded_predicted_boxes, encoded_predicted_classes
-            )
-            (
-                target_boxes,
-                target_classes,
-                _,
-            ) = self.encoder.decode_model_output(
-                encoded_target_boxes, encoded_target_classes.flatten()
-            )
-            mean_average_precision = utils.mean_average_precision(
-                predicted_boxes[prediction_is_object],
-                predicted_classes[prediction_is_object],
-                target_boxes[target_is_object.flatten()],
-                target_classes[target_is_object.flatten()],
-                self.threshold,
-                self.encoder.num_classes,
-            )
             accuracy = self.accuracy(
                 predicted_class_logits, encoded_target_classes.flatten()
             )
-        if self.encoder.num_classes == 4:
-            self.log("train/accuracy/no_box", accuracy[0])
-            self.log("train/accuracy/robot", accuracy[1])
-            self.log("train/accuracy/ball", accuracy[2])
-            self.log("train/accuracy/penalty", accuracy[3])
-            self.log("train/accuracy/goal_post", accuracy[4])
-        elif self.encoder.num_classes == 1:
-            self.log("train/accuracy/no_object", accuracy[0])
-            self.log("train/accuracy/object", accuracy[1])
+        self.log("train/accuracy/no_object", accuracy[0])
+        for object_class in self.encoder.classes:
+            self.log(
+                f"train/accuracy/{object_class}",
+                accuracy[self.encoder.classes.index(object_class) + 1],
+            )
         self.log("train/loss/classification", mined_classification_loss)
         self.log("train/loss/location", location_loss)
-        self.log("train/mean_average_precision", mean_average_precision)
         return mined_classification_loss + location_loss
 
-    def loss(
+    def bounding_box_loss(
         self,
         target_boxes,
         target_is_object,
@@ -213,6 +186,7 @@ class MultiClassJetNet(pl.LightningModule):
         positive_classification_loss = classfication_loss[target_is_object.flatten()]
         negative_classification_loss = classfication_loss[~target_is_object.flatten()]
         sorted_loss, _ = negative_classification_loss.sort(descending=True)
+        # Hard negative mining
         number_of_negative = torch.clamp(
             torch.tensor(3 * number_of_positive), max=sorted_loss.size(0)
         )
@@ -221,10 +195,10 @@ class MultiClassJetNet(pl.LightningModule):
         ) / (number_of_negative + number_of_positive)
         return mined_classification_loss, location_loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, _):
         image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
         encoded_predicted_boxes, predicted_class_logits = self(image)
-        mined_classification_loss, location_loss = self.loss(
+        mined_classification_loss, location_loss = self.bounding_box_loss(
             encoded_target_boxes,
             target_is_object,
             encoded_target_classes,
@@ -232,50 +206,17 @@ class MultiClassJetNet(pl.LightningModule):
             predicted_class_logits,
         )
         with torch.no_grad():
-            encoded_predicted_classes = utils.calculate_predicted_classes(
-                predicted_class_logits
-            )
-            (
-                predicted_boxes,
-                predicted_classes,
-                prediction_is_object,
-            ) = self.encoder.decode_model_output(
-                encoded_predicted_boxes, encoded_predicted_classes
-            )
-            (
-                target_boxes,
-                target_classes,
-                _,
-            ) = self.encoder.decode_model_output(
-                encoded_target_boxes, encoded_target_classes.flatten()
-            )
-            mean_average_precision = utils.mean_average_precision(
-                predicted_boxes[prediction_is_object],
-                predicted_classes[prediction_is_object],
-                target_boxes[target_is_object.flatten()],
-                target_classes[target_is_object.flatten()],
-                self.threshold,
-                self.encoder.num_classes,
-            )
             accuracy = self.accuracy(
                 predicted_class_logits, encoded_target_classes.flatten()
             )
-            self.mean_average_precisions.append(
-                torch.nan_to_num(mean_average_precision)
+        self.log("val/accuracy/no_object", accuracy[0])
+        for object_class in self.encoder.classes:
+            self.log(
+                f"val/accuracy/{object_class}",
+                accuracy[self.encoder.classes.index(object_class) + 1],
             )
-        if self.encoder.num_classes == 4:
-            self.log("val/accuracy/no_box", accuracy[0])
-            self.log("val/accuracy/robot", accuracy[1])
-            self.log("val/accuracy/ball", accuracy[2])
-            self.log("val/accuracy/penalty", accuracy[3])
-            self.log("val/accuracy/goal_post", accuracy[4])
-        elif self.encoder.num_classes == 1:
-            print(accuracy)
-            self.log("val/accuracy/no_object", accuracy[0])
-            self.log("val/accuracy/object", accuracy[1])
         self.log("val/loss/classification", mined_classification_loss)
         self.log("val/loss/location", location_loss)
-        self.log("val/mean_average_precision", mean_average_precision)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
