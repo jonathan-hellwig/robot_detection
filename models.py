@@ -59,6 +59,8 @@ class NormConv2dReLU(nn.Module):
 
 
 class MultiClassJetNet(pl.LightningModule):
+    NUM_BOX_PARAMETERS = 4
+
     def __init__(self, encoder: utils.Encoder, learning_rate: float) -> None:
         super().__init__()
         self.mean_average_precisions = []
@@ -66,7 +68,6 @@ class MultiClassJetNet(pl.LightningModule):
         self.encoder = encoder
         self.learning_rate = learning_rate
         assert encoder.feature_map_height == 8 and encoder.feature_map_width == 10
-        NUM_BOX_PARAMETERS = 4
 
         self.accuracy = MulticlassAccuracy(
             num_classes=encoder.num_classes + 1, average=None
@@ -96,7 +97,7 @@ class MultiClassJetNet(pl.LightningModule):
 
         self.output_layer = nn.Conv2d(
             24,
-            (self.encoder.num_classes + 1 + NUM_BOX_PARAMETERS)
+            (self.encoder.num_classes + 1 + self.NUM_BOX_PARAMETERS)
             * self.encoder.default_scalings.size(0),
             1,
             padding="same",
@@ -114,7 +115,6 @@ class MultiClassJetNet(pl.LightningModule):
         output: (batch_size, num_anchors, num_classes + 1 + 4)
         """
         batch_size = output.size(0)
-        NUM_BOX_PARAMETERS = 4
         output = output.permute((0, 2, 3, 1))
         output = output.reshape(
             (
@@ -122,13 +122,13 @@ class MultiClassJetNet(pl.LightningModule):
                 self.encoder.feature_map_height,
                 self.encoder.feature_map_width,
                 self.encoder.default_scalings.size(0),
-                NUM_BOX_PARAMETERS + self.encoder.num_classes + 1,
+                self.NUM_BOX_PARAMETERS + self.encoder.num_classes + 1,
             )
         )
-        predicted_boxes = output[:, :, :, :, 0:NUM_BOX_PARAMETERS].reshape(
-            (batch_size, -1, NUM_BOX_PARAMETERS)
+        predicted_boxes = output[:, :, :, :, 0 : self.NUM_BOX_PARAMETERS].reshape(
+            (batch_size, -1, self.NUM_BOX_PARAMETERS)
         )
-        predicted_class_logits = output[:, :, :, :, NUM_BOX_PARAMETERS:].reshape(
+        predicted_class_logits = output[:, :, :, :, self.NUM_BOX_PARAMETERS :].reshape(
             (-1, self.encoder.num_classes + 1)
         )
         return predicted_boxes, predicted_class_logits
