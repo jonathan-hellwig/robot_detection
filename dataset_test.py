@@ -3,7 +3,7 @@ import unittest
 import torchvision.transforms as T
 import torch
 
-from datasets import RoboEireanData, TransformedDataset
+from datasets import RoboEireanData, TransformedRoboEireanData
 
 
 class TestRoboEireanData(unittest.TestCase):
@@ -42,7 +42,7 @@ class TestTransformedDataset(unittest.TestCase):
             ]
         )
         encoder = utils.Encoder(default_scalings, ["robot"])
-        dataset = TransformedDataset("data/train", encoder)
+        dataset = TransformedRoboEireanData("data/train", encoder)
         image, encoded_bounding_boxes, target_masks, encoded_target_classes = dataset[0]
         self.assertEqual(image.shape, (1, 60, 80))
         self.assertEqual(encoded_bounding_boxes.shape, (480, 4))

@@ -60,7 +60,7 @@ class RoboEireanData(torch.utils.data.Dataset):
         return len(self.images)
 
 
-class TransformedDataset(torch.utils.data.Dataset):
+class TransformedRoboEireanData(torch.utils.data.Dataset):
     def __init__(
         self,
         data_path: str,
