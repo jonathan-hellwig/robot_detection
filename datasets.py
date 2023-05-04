@@ -11,7 +11,7 @@ import torchvision.transforms as T
 from utils import Encoder
 
 
-class ObjectDetectionDataset(torch.utils.data.Dataset):
+class RoboEireanData(torch.utils.data.Dataset):
     def __init__(
         self, data_path: str, image_transforms=None, bounding_box_transforms=None
     ) -> None:
@@ -175,7 +175,7 @@ class SyntheticData(torch.utils.data.Dataset):
         )
 
 
-def calculate_mean_std(dataset: ObjectDetectionDataset):
+def calculate_mean_std(dataset: RoboEireanData):
     means = []
     for image, _, _ in tqdm.tqdm(dataset):
         means.append(torch.mean(image, dim=(1, 2)))
@@ -213,7 +213,7 @@ def preprocess_data(
         ]
     )
     bounding_box_transforms = T.Compose([])
-    train_data = ObjectDetectionDataset(
+    train_data = RoboEireanData(
         data_path,
         image_transforms=image_transforms,
         bounding_box_transforms=bounding_box_transforms,
