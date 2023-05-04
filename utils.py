@@ -54,7 +54,7 @@ class Encoder:
         self.default_boxes_tl_br = self._default_boxes("tlbr")
         self.default_boxes_xy_wh = self._default_boxes("xywh")
 
-    def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor):
+    def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if target_boxes.size(0) == 0:
             num_default_boxes = self.default_boxes_xy_wh.size(0)
             return (
