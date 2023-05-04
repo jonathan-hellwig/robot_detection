@@ -223,7 +223,7 @@ def preprocess_data(
     image_stds = []
     target_bounding_boxes = []
     target_classes = []
-    for i, (image, target_bounding_box, target_class) in enumerate(train_data):
+    for image, target_bounding_box, target_class in tqdm(train_data):
         for image_augmentation, bounding_box_augmentation in zip(
             image_augmentations, bounding_box_augmentations
         ):
@@ -232,8 +232,6 @@ def preprocess_data(
             target_classes.append(target_class)
             image_means.append(torch.mean(images[-1], dim=(1, 2)))
             image_stds.append(torch.std(images[-1], dim=(1, 2)))
-        if i % 10 == 0:
-            print(f"{i}/{len(train_data)}")
     image_means = torch.tensor(image_means)
     image_stds = torch.tensor(image_stds)
     image_mean = torch.mean(image_means)
