@@ -60,6 +60,33 @@ class RoboEireanData(torch.utils.data.Dataset):
         return len(self.images)
 
 
+class RoboEireanDataWithEncoder(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        data_path: str,
+        encoder: Encoder,
+        selected_classes: list[str],
+        image_transforms=None,
+        bounding_box_transforms=None,
+    ) -> None:
+        self.dataset = RoboEireanData(
+            data_path, selected_classes, image_transforms, bounding_box_transforms
+        )
+        self.encoder = encoder
+
+    def __getitem__(self, idx):
+        image, target_bounding_boxes, target_classes = self.dataset[idx]
+        (
+            encoded_bounding_boxes,
+            target_mask,
+            target_classes,
+        ) = self.encoder.apply(target_bounding_boxes, target_classes)
+        return image, encoded_bounding_boxes, target_mask, target_classes
+
+    def __len__(self):
+        return len(self.dataset)
+
+
 class TransformedRoboEireanData(torch.utils.data.Dataset):
     def __init__(
         self,
