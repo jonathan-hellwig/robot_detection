@@ -26,16 +26,16 @@ def xywh_to_tlbr(xywh_bounding_boxes: torch.Tensor) -> torch.Tensor:
 class Encoder:
     def __init__(
         self,
-        default_scalings: torch.Tensor,
+        default_box_scalings: torch.Tensor,
         classes: list[str],
         feature_map_size: tuple[int, int] = (10, 8),
-        threshold: float = 0.5,
+        iou_threshold: float = 0.5,
     ) -> None:
-        self.default_scalings = default_scalings
+        self.default_scalings = default_box_scalings
         self.feature_map_width, self.feature_map_height = feature_map_size
         self.classes = classes
         self.num_classes = len(classes)
-        self.threshold = threshold
+        self.threshold = iou_threshold
         self.default_boxes_tl_br = self._default_boxes("tlbr")
         self.default_boxes_xy_wh = self._default_boxes("xywh")
 
@@ -120,7 +120,7 @@ class Encoder:
         decoded_boxes = decoded_boxes.reshape((-1, NUM_BOX_PARAMETERS))
         return (decoded_boxes, encoded_predicted_classes, prediction_is_object)
 
-    def _default_boxes(self, type):
+    def _default_boxes(self, type: str):
         assert type in ["xywh", "tlbr"]
         default_boxes = torch.zeros(
             (
