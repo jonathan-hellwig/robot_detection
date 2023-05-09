@@ -11,6 +11,15 @@ import utils
 
 
 class RoboEireanData(torch.utils.data.Dataset):
+    """Custom PyTorch Dataset class for loading RoboEireann dataset.
+
+    Args:
+        data_path (str): Path to dataset directory.
+        selected_classes (List[str]): List of classes to select from ["ball", "robot", "goal_post", "penalty_spot"].
+        image_transforms (optional): Torchvision transforms to apply on the images. Defaults to None.
+        bounding_box_transforms (optional): A function that takes in a tensor of bounding boxes and applies the transformation. Defaults to None.
+    """
+
     CLASSES = ["ball", "robot", "goal_post", "penalty_spot"]
 
     def __init__(
@@ -60,6 +69,17 @@ class RoboEireanData(torch.utils.data.Dataset):
 
 
 class RoboEireanDataWithEncoder(torch.utils.data.Dataset):
+    """
+    A PyTorch Dataset for the RoboEirean dataset that encodes bounding boxes using an Encoder object.
+
+    Args:
+        data_path (str): The path to the RoboEirean dataset.
+        encoder (utils.Encoder): An Encoder object that will be used to encode the bounding boxes.
+        selected_classes (list[str]): A list of the classes to include in the dataset.
+        image_transforms (optional): A transformation to apply to the images.
+        bounding_box_transforms (optional): A transformation to apply to the bounding boxes.
+    """
+
     def __init__(
         self,
         data_path: str,
@@ -126,6 +146,16 @@ class TransformedRoboEireanData(torch.utils.data.Dataset):
 
 
 class SyntheticData(torch.utils.data.Dataset):
+    """
+    SyntheticData generates a synthetic dataset of images with bounding boxes and classes.
+
+    Args:
+        image_width (int): Width of the generated images.
+        image_height (int): Height of the generated images.
+        length (int): Number of images in the dataset.
+        encoder (utils.Encoder): An encoder object to encode bounding boxes and classes.
+    """
+
     def __init__(
         self, image_width: int, image_height: int, length: int, encoder: utils.Encoder
     ):
