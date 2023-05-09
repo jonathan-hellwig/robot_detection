@@ -64,7 +64,6 @@ class MultiClassJetNet(pl.LightningModule):
     def __init__(self, encoder: utils.Encoder, learning_rate: float) -> None:
         super().__init__()
         self.mean_average_precisions = []
-        self.threshold = 0.5
         self.encoder = encoder
         self.learning_rate = learning_rate
 
