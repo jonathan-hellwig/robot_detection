@@ -1,8 +1,5 @@
-import torch.nn.functional as F
 import torchvision.transforms as T
 from PIL import ImageDraw, Image
-import torch
-import utils
 
 
 def tensor_to_pil(image, normalize):
