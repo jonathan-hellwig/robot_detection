@@ -9,7 +9,9 @@ import utils
 
 
 class DepthWise(nn.Module):
-    def __init__(self, in_channels, out_channels, use_stride=False) -> None:
+    def __init__(
+        self, in_channels: int, out_channels: int, use_stride: bool = False
+    ) -> None:
         super().__init__()
         self.batch_normalization = nn.BatchNorm2d(in_channels)
         if use_stride:
@@ -34,7 +36,7 @@ class DepthWise(nn.Module):
         self.conv2d_2 = nn.Conv2d(in_channels, out_channels, 1, padding="same")
         self.relu = nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.batch_normalization(x)
         x = self.conv2d_1(x)
         x = self.conv2d_2(x)
@@ -43,7 +45,7 @@ class DepthWise(nn.Module):
 
 
 class NormConv2dReLU(nn.Module):
-    def __init__(self, in_channels, out_channels) -> None:
+    def __init__(self, in_channels: int, out_channels: int) -> None:
         super().__init__()
         self.batch_normalization = nn.BatchNorm2d(in_channels)
         self.conv2d = nn.Conv2d(
@@ -51,7 +53,7 @@ class NormConv2dReLU(nn.Module):
         )
         self.relu = nn.ReLU()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.batch_normalization(x)
         x = self.conv2d(x)
         x = self.relu(x)
@@ -101,14 +103,16 @@ class MultiClassJetNet(pl.LightningModule):
             padding="same",
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.input_layer(x)
         x = self.depth_wise_backbone(x)
         x = self.classifier(x)
         x = self.output_layer(x)
         return self._format_model_output(x)
 
-    def _format_model_output(self, output):
+    def _format_model_output(
+        self, output: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         output: (batch_size, num_anchors, num_classes + 1 + 4)
         """
@@ -131,7 +135,9 @@ class MultiClassJetNet(pl.LightningModule):
         )
         return predicted_boxes, predicted_class_logits
 
-    def training_step(self, batch, _):
+    def training_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], _
+    ):
         image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
         encoded_predicted_boxes, predicted_class_logits = self(image)
         mined_classification_loss, location_loss = self.bounding_box_loss(
@@ -155,14 +161,39 @@ class MultiClassJetNet(pl.LightningModule):
         self.log("train/loss/location", location_loss)
         return mined_classification_loss + location_loss
 
+    def validation_step(
+        self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], _
+    ):
+        image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
+        encoded_predicted_boxes, predicted_class_logits = self(image)
+        mined_classification_loss, location_loss = self.bounding_box_loss(
+            encoded_target_boxes,
+            target_is_object,
+            encoded_target_classes,
+            encoded_predicted_boxes,
+            predicted_class_logits,
+        )
+        with torch.no_grad():
+            accuracy = self.accuracy(
+                predicted_class_logits, encoded_target_classes.flatten()
+            )
+        self.log("val/accuracy/no_object", accuracy[0])
+        for object_class in self.encoder.classes:
+            self.log(
+                f"val/accuracy/{object_class}",
+                accuracy[self.encoder.classes.index(object_class) + 1],
+            )
+        self.log("val/loss/classification", mined_classification_loss)
+        self.log("val/loss/location", location_loss)
+
     def bounding_box_loss(
         self,
-        target_boxes,
-        target_is_object,
-        target_classes,
-        predicted_boxes,
-        predicted_class_logits,
-    ):
+        target_boxes: torch.Tensor,
+        target_is_object: torch.Tensor,
+        target_classes: torch.Tensor,
+        predicted_boxes: torch.Tensor,
+        predicted_class_logits: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         selected_predicted_boxes = predicted_boxes[target_is_object]
         selected_target_boxes = target_boxes[target_is_object]
         number_of_positive = selected_predicted_boxes.size(0)
@@ -193,29 +224,6 @@ class MultiClassJetNet(pl.LightningModule):
         ) / (number_of_negative + number_of_positive)
         return mined_classification_loss, location_loss
 
-    def validation_step(self, batch, _):
-        image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
-        encoded_predicted_boxes, predicted_class_logits = self(image)
-        mined_classification_loss, location_loss = self.bounding_box_loss(
-            encoded_target_boxes,
-            target_is_object,
-            encoded_target_classes,
-            encoded_predicted_boxes,
-            predicted_class_logits,
-        )
-        with torch.no_grad():
-            accuracy = self.accuracy(
-                predicted_class_logits, encoded_target_classes.flatten()
-            )
-        self.log("val/accuracy/no_object", accuracy[0])
-        for object_class in self.encoder.classes:
-            self.log(
-                f"val/accuracy/{object_class}",
-                accuracy[self.encoder.classes.index(object_class) + 1],
-            )
-        self.log("val/loss/classification", mined_classification_loss)
-        self.log("val/loss/location", location_loss)
-
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> optim.Optimizer:
         optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer

@@ -1,13 +1,14 @@
 import torchvision.transforms as T
 from PIL import ImageDraw, Image
+import torch
 
 
-def tensor_to_pil(image, normalize):
+def tensor_to_pil(image: torch.Tensor, normalize: torch.Tensor):
     image = image * normalize[1] + normalize[0]
     return T.ToPILImage()(image)
 
 
-def draw_bounding_box(image, bounding_boxes):
+def draw_bounding_box(image: Image.Image, bounding_boxes: torch.Tensor) -> Image.Image:
     image_draw = ImageDraw.Draw(image)
     for i in range(bounding_boxes.size(0)):
         cx = int(bounding_boxes[i][0] * image.size[0])
@@ -19,7 +20,7 @@ def draw_bounding_box(image, bounding_boxes):
     return image
 
 
-def image_grid(imgs, rows, cols):
+def image_grid(imgs, rows: int, cols: int) -> Image.Image:
     assert len(imgs) == rows * cols
 
     w, h = imgs[0].size
@@ -30,7 +31,12 @@ def image_grid(imgs, rows, cols):
     return grid
 
 
-def draw_model_output(image, decoded_boxes, predicted_classes, normalize):
+def draw_model_output(
+    image: Image.Image,
+    decoded_boxes: torch.Tensor,
+    predicted_classes: torch.Tensor,
+    normalize: torch.Tensor,
+) -> Image.Image:
     detection_is_object = predicted_classes > 0
     object_boxes = decoded_boxes[detection_is_object]
 

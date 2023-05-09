@@ -7,8 +7,7 @@ from PIL import Image, ImageDraw
 import torchvision
 import torchvision.transforms as T
 
-
-from utils import Encoder
+import utils
 
 
 class RoboEireanData(torch.utils.data.Dataset):
@@ -64,7 +63,7 @@ class RoboEireanDataWithEncoder(torch.utils.data.Dataset):
     def __init__(
         self,
         data_path: str,
-        encoder: Encoder,
+        encoder: utils.Encoder,
         selected_classes: list[str],
         image_transforms=None,
         bounding_box_transforms=None,
@@ -91,7 +90,7 @@ class TransformedRoboEireanData(torch.utils.data.Dataset):
     def __init__(
         self,
         data_path: str,
-        encoder: Encoder,
+        encoder: utils.Encoder,
     ) -> None:
         self.encoder = encoder
         loaded_images = torch.load(data_path + "/transformed_images.pt")
@@ -127,7 +126,9 @@ class TransformedRoboEireanData(torch.utils.data.Dataset):
 
 
 class SyntheticData(torch.utils.data.Dataset):
-    def __init__(self, image_width, image_height, length, encoder):
+    def __init__(
+        self, image_width: int, image_height: int, length: int, encoder: utils.Encoder
+    ):
         self.image_width = image_width
         self.image_height = image_height
         self.length = length
@@ -147,7 +148,7 @@ class SyntheticData(torch.utils.data.Dataset):
             self.encoded_target_classes.append(target_classes)
             self.target_masks.append(target_mask)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         return (
             self.images[idx],
             self.encoded_bounding_boxes[idx],
@@ -214,7 +215,7 @@ def create_train_val_split():
 
 
 def preprocess_data(
-    data_path,
+    data_path: str,
     image_augmentations=[lambda x: x],
     bounding_box_augmentations=[lambda x: x],
 ):
@@ -258,7 +259,7 @@ def preprocess_data(
     torch.save(torch.tensor([image_mean, image_std]), data_path + "/image_normalize.pt")
 
 
-def flip_bounding_boxes(bounding_boxes):
+def flip_bounding_boxes(bounding_boxes: torch.Tensor):
     bounding_boxes = bounding_boxes.clone()
     bounding_boxes[:, 0] = 1 - bounding_boxes[:, 0]
     return bounding_boxes
