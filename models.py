@@ -67,7 +67,6 @@ class MultiClassJetNet(pl.LightningModule):
         self.threshold = 0.5
         self.encoder = encoder
         self.learning_rate = learning_rate
-        assert encoder.feature_map_height == 8 and encoder.feature_map_width == 10
 
         self.accuracy = MulticlassAccuracy(
             num_classes=encoder.num_classes + 1, average=None
