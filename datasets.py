@@ -260,6 +260,7 @@ def preprocess_data(
     bounding_box_transforms = T.Compose([])
     train_data = RoboEireanData(
         data_path,
+        ["robot"],
         image_transforms=image_transforms,
         bounding_box_transforms=bounding_box_transforms,
     )
@@ -268,7 +269,7 @@ def preprocess_data(
     image_stds = []
     target_bounding_boxes = []
     target_classes = []
-    for image, target_bounding_box, target_class in tqdm(train_data):
+    for image, target_bounding_box, target_class in tqdm.tqdm(train_data):
         for image_augmentation, bounding_box_augmentation in zip(
             image_augmentations, bounding_box_augmentations
         ):
@@ -289,9 +290,10 @@ def preprocess_data(
     torch.save(torch.tensor([image_mean, image_std]), data_path + "/image_normalize.pt")
 
 
-def flip_bounding_boxes(bounding_boxes: torch.Tensor):
+def flip_bounding_boxes(bounding_boxes: torch.Tensor) -> torch.Tensor:
     bounding_boxes = bounding_boxes.clone()
-    bounding_boxes[:, 0] = 1 - bounding_boxes[:, 0]
+    if bounding_boxes.dim() == 2:
+        bounding_boxes[:, 0] = 1 - bounding_boxes[:, 0]
     return bounding_boxes
 
 
