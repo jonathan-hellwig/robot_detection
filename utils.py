@@ -5,22 +5,6 @@ import torch
 NUM_BOX_PARAMETERS: int = 4
 
 
-def scalings(
-    square_scaling,
-    rectangular_scaling,
-    number_of_square_scalings,
-    number_of_rectangular_scalings,
-):
-    return torch.row_stack(
-        (
-            square_scaling
-            / (1.4 ** torch.arange(0, number_of_square_scalings).unsqueeze(1)),
-            rectangular_scaling
-            / (1.4 ** torch.arange(0, number_of_rectangular_scalings)).unsqueeze(1),
-        )
-    )
-
-
 def xywh_to_tlbr(xywh_bounding_boxes: torch.Tensor) -> torch.Tensor:
     """
     Convert bounding boxes from (cx, cy, w, h) format to (top_left_x, top_left_y, bottom_right_x, bottom_right_y) format.
@@ -44,17 +28,20 @@ class Encoder:
         self,
         default_scalings: torch.Tensor,
         classes: list[str],
+        feature_map_size: tuple[int, int] = (10, 8),
         threshold: float = 0.5,
     ) -> None:
         self.default_scalings = default_scalings
-        self.feature_map_width, self.feature_map_height = (10, 8)
+        self.feature_map_width, self.feature_map_height = feature_map_size
         self.classes = classes
         self.num_classes = len(classes)
         self.threshold = threshold
         self.default_boxes_tl_br = self._default_boxes("tlbr")
         self.default_boxes_xy_wh = self._default_boxes("xywh")
 
-    def apply(self, target_boxes: torch.Tensor, target_classes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def apply(
+        self, target_boxes: torch.Tensor, target_classes: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if target_boxes.size(0) == 0:
             num_default_boxes = self.default_boxes_xy_wh.size(0)
             return (
