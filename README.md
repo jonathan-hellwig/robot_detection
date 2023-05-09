@@ -40,3 +40,4 @@ pip install -r requirements.txt
 # Training
 
 The files `robot_detection_train.ipynb` and `synthetic_data_train.ipynb` contain the code to train a JetNet on the RoboEireann data and synthetic data respectively.
+Each training run automatically generates a directory with log files that can be visualized with tensorboard.
