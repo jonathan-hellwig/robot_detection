@@ -7,7 +7,7 @@ NUM_BOX_PARAMETERS: int = 4
 
 def xywh_to_tlbr(xywh_bounding_boxes: torch.Tensor) -> torch.Tensor:
     """
-    Convert bounding boxes from (cx, cy, w, h) format to (top_left_x, top_left_y, bottom_right_x, bottom_right_y) format.
+    Convert bounding boxes from (center_x, center_y, width, height) format to (top_left_x, top_left_y, bottom_right_x, bottom_right_y) format.
 
     Prameters:
     - xywh_bounding_boxes: (batch_size, 4)
