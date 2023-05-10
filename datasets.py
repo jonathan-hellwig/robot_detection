@@ -230,22 +230,6 @@ def calculate_mean_std(dataset: RoboEireanData):
     return mean, std
 
 
-def create_train_val_split():
-    images = os.listdir(os.path.join("data", "train", "images"))
-    index = torch.randperm(len(images))
-    val_index = index[: int(0.2 * len(images))]
-    val_files = [images[idx][:-3] for idx in val_index]
-    for files in val_files:
-        shutil.move(
-            os.path.join("data", "train", "images", files + "png"),
-            os.path.join("data", "val", "images", files + "png"),
-        )
-        shutil.move(
-            os.path.join("data", "train", "labels", files + "txt"),
-            os.path.join("data", "val", "labels", files + "txt"),
-        )
-
-
 def preprocess_data(
     base_path: str,
     split_path: str,
