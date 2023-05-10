@@ -35,13 +35,13 @@ class RoboEireanData(torch.utils.data.Dataset):
         self.data_path = data_path
         self.selected_classes = selected_classes
 
-        self.images = sorted(os.listdir(data_path + "/images/"))
-        self.labels = sorted(os.listdir(data_path + "/labels/"))
+        self.images = sorted(os.listdir(os.path.join(data_path, "images")))
+        self.labels = sorted(os.listdir(os.path.join(data_path, "labels")))
 
     def __getitem__(self, idx):
         assert self.images[idx][:-3] == self.labels[idx][:-3]
-        image_path = self.data_path + "/images/" + self.images[idx]
-        label_path = self.data_path + "/labels/" + self.labels[idx]
+        image_path = os.path.join(self.data_path, "images", self.images[idx])
+        label_path = os.path.join(self.data_path, "labels", self.labels[idx])
         image = Image.open(image_path)
         label_strings = open(label_path).read().splitlines()
         target_bounding_boxes = []
@@ -113,9 +113,9 @@ class TransformedRoboEireanData(torch.utils.data.Dataset):
         encoder: utils.Encoder,
     ) -> None:
         self.encoder = encoder
-        loaded_images = torch.load(data_path + "/transformed_images.pt")
-        bounding_boxes = torch.load(data_path + "/target_bounding_boxes.pt")
-        object_classes = torch.load(data_path + "/target_classes.pt")
+        loaded_images = torch.load(os.path.join(data_path, "transformed_images.pt"))
+        bounding_boxes = torch.load(os.path.join(data_path, "target_bounding_boxes.pt"))
+        object_classes = torch.load(os.path.join(data_path, "target_classes.pt"))
         self.images = []
         self.encoded_bounding_boxes = []
         self.encoded_target_classes = []
@@ -231,16 +231,18 @@ def calculate_mean_std(dataset: RoboEireanData):
 
 
 def create_train_val_split():
-    images = os.listdir("data/train/images/")
+    images = os.listdir(os.path.join("data", "train", "images"))
     index = torch.randperm(len(images))
     val_index = index[: int(0.2 * len(images))]
     val_files = [images[idx][:-3] for idx in val_index]
     for files in val_files:
         shutil.move(
-            "data/train/images/" + files + "png", "data/val/images/" + files + "png"
+            os.path.join("data", "train", "images", files + "png"),
+            os.path.join("data", "val", "images", files + "png"),
         )
         shutil.move(
-            "data/train/labels/" + files + "txt", "data/val/labels/" + files + "txt"
+            os.path.join("data", "train", "labels", files + "txt"),
+            os.path.join("data", "val", "labels", files + "txt"),
         )
 
 
@@ -284,10 +286,14 @@ def preprocess_data(
     image_std = torch.mean(image_stds)
 
     stacked_images = (torch.stack(images) - image_mean) / image_std
-    torch.save(stacked_images, data_path + "/transformed_images.pt")
-    torch.save(target_bounding_boxes, data_path + "/target_bounding_boxes.pt")
-    torch.save(target_classes, data_path + "/target_classes.pt")
-    torch.save(torch.tensor([image_mean, image_std]), data_path + "/image_normalize.pt")
+    transformed_images_path = os.path.join(data_path, "transformed_images.pt")
+    target_bounding_boxes_path = os.path.join(data_path, "target_bounding_boxes.pt")
+    target_classes_path = os.path.join(data_path, "target_classes.pt")
+    image_normalize_path = os.path.join(data_path, "image_normalize.pt")
+    torch.save(stacked_images, transformed_images_path)
+    torch.save(target_bounding_boxes, target_bounding_boxes_path)
+    torch.save(target_classes, target_classes_path)
+    torch.save(torch.tensor([image_mean, image_std]), image_normalize_path)
 
 
 def flip_bounding_boxes(bounding_boxes: torch.Tensor) -> torch.Tensor:
@@ -300,5 +306,7 @@ def flip_bounding_boxes(bounding_boxes: torch.Tensor) -> torch.Tensor:
 if __name__ == "__main__":
     image_augmentations = [lambda x: x, torchvision.transforms.functional.hflip]
     bounding_box_augmentations = [lambda x: x, flip_bounding_boxes]
-    preprocess_data("data/val")
-    preprocess_data("data/train", image_augmentations, bounding_box_augmentations)
+    preprocess_data(os.path.join("data", "val"))
+    preprocess_data(
+        os.path.join("data", "train"), image_augmentations, bounding_box_augmentations
+    )
