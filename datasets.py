@@ -247,7 +247,8 @@ def create_train_val_split():
 
 
 def preprocess_data(
-    data_path: str,
+    base_path: str,
+    split_path: str,
     image_augmentations=[lambda x: x],
     bounding_box_augmentations=[lambda x: x],
 ):
@@ -261,7 +262,7 @@ def preprocess_data(
     )
     bounding_box_transforms = T.Compose([])
     train_data = RoboEireanData(
-        data_path,
+        os.path.join(base_path, "raw", split_path),
         ["robot"],
         image_transforms=image_transforms,
         bounding_box_transforms=bounding_box_transforms,
@@ -286,10 +287,18 @@ def preprocess_data(
     image_std = torch.mean(image_stds)
 
     stacked_images = (torch.stack(images) - image_mean) / image_std
-    transformed_images_path = os.path.join(data_path, "transformed_images.pt")
-    target_bounding_boxes_path = os.path.join(data_path, "target_bounding_boxes.pt")
-    target_classes_path = os.path.join(data_path, "target_classes.pt")
-    image_normalize_path = os.path.join(data_path, "image_normalize.pt")
+    transformed_images_path = os.path.join(
+        base_path, "transformed", split_path, "transformed_images.pt"
+    )
+    target_bounding_boxes_path = os.path.join(
+        base_path, "transformed", split_path, "target_bounding_boxes.pt"
+    )
+    target_classes_path = os.path.join(
+        base_path, "transformed", split_path, "target_classes.pt"
+    )
+    image_normalize_path = os.path.join(
+        base_path, "transformed", split_path, "image_normalize.pt"
+    )
     torch.save(stacked_images, transformed_images_path)
     torch.save(target_bounding_boxes, target_bounding_boxes_path)
     torch.save(target_classes, target_classes_path)
@@ -306,7 +315,10 @@ def flip_bounding_boxes(bounding_boxes: torch.Tensor) -> torch.Tensor:
 if __name__ == "__main__":
     image_augmentations = [lambda x: x, torchvision.transforms.functional.hflip]
     bounding_box_augmentations = [lambda x: x, flip_bounding_boxes]
-    preprocess_data(os.path.join("data", "val"))
+    preprocess_data("data", "val")
     preprocess_data(
-        os.path.join("data", "train"), image_augmentations, bounding_box_augmentations
+        "data",
+        "train",
+        image_augmentations,
+        bounding_box_augmentations,
     )
