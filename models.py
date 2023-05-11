@@ -60,18 +60,17 @@ class NormConv2dReLU(nn.Module):
         return x
 
 
+# TODO: handle hyperparameters differently
 class MultiClassJetNet(pl.LightningModule):
     NUM_BOX_PARAMETERS = 4
 
-    def __init__(self, encoder: utils.Encoder, learning_rate: float) -> None:
+    def __init__(self, num_classes, num_boxes, learning_rate: float) -> None:
         super().__init__()
         self.mean_average_precisions = []
-        self.encoder = encoder
         self.learning_rate = learning_rate
-
-        self.accuracy = MulticlassAccuracy(
-            num_classes=encoder.num_classes + 1, average=None
-        )
+        self.num_classes = num_classes
+        self.num_boxes = num_boxes
+        self.accuracy = MulticlassAccuracy(num_classes=num_classes + 1, average=None)
         self.block_channels = [[24, 16, 16, 20], [20, 20, 20, 20, 24]]
 
         self.input_layer = NormConv2dReLU(1, 16)
@@ -97,8 +96,7 @@ class MultiClassJetNet(pl.LightningModule):
 
         self.output_layer = nn.Conv2d(
             24,
-            (self.encoder.num_classes + 1 + self.NUM_BOX_PARAMETERS)
-            * self.encoder.default_scalings.size(0),
+            (self.num_classes + 1 + self.NUM_BOX_PARAMETERS) * self.num_boxes,
             1,
             padding="same",
         )
@@ -114,24 +112,24 @@ class MultiClassJetNet(pl.LightningModule):
         self, output: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        output: (batch_size, num_anchors, num_classes + 1 + 4)
+        output: (batch_size, num_anchors * (num_classes + 1 + 4), feature_map_height, feature_map_height)
         """
-        batch_size = output.size(0)
+        batch_size, _, feature_map_height, feature_map_width = output.shape
         output = output.permute((0, 2, 3, 1))
         output = output.reshape(
             (
                 -1,
-                self.encoder.feature_map_height,
-                self.encoder.feature_map_width,
-                self.encoder.default_scalings.size(0),
-                self.NUM_BOX_PARAMETERS + self.encoder.num_classes + 1,
+                feature_map_height,
+                feature_map_width,
+                self.num_boxes,
+                self.NUM_BOX_PARAMETERS + self.num_classes + 1,
             )
         )
         predicted_boxes = output[:, :, :, :, 0 : self.NUM_BOX_PARAMETERS].reshape(
             (batch_size, -1, self.NUM_BOX_PARAMETERS)
         )
         predicted_class_logits = output[:, :, :, :, self.NUM_BOX_PARAMETERS :].reshape(
-            (-1, self.encoder.num_classes + 1)
+            (-1, self.num_classes + 1)
         )
         return predicted_boxes, predicted_class_logits
 
@@ -152,11 +150,10 @@ class MultiClassJetNet(pl.LightningModule):
                 predicted_class_logits, encoded_target_classes.flatten()
             )
         self.log("train/accuracy/no_object", accuracy[0])
-        for object_class in self.encoder.classes:
-            self.log(
-                f"train/accuracy/{object_class}",
-                accuracy[self.encoder.classes.index(object_class) + 1],
-            )
+        self.log(
+            f"train/accuracy/robot",
+            accuracy[1],
+        )
         self.log("train/loss/classification", mined_classification_loss)
         self.log("train/loss/location", location_loss)
         return mined_classification_loss + location_loss
@@ -178,11 +175,10 @@ class MultiClassJetNet(pl.LightningModule):
                 predicted_class_logits, encoded_target_classes.flatten()
             )
         self.log("val/accuracy/no_object", accuracy[0])
-        for object_class in self.encoder.classes:
-            self.log(
-                f"val/accuracy/{object_class}",
-                accuracy[self.encoder.classes.index(object_class) + 1],
-            )
+        self.log(
+            f"val/accuracy/robot",
+            accuracy[1],
+        )
         self.log("val/loss/classification", mined_classification_loss)
         self.log("val/loss/location", location_loss)
 
