@@ -2,5 +2,6 @@
 players_deeptector.h5
 __pycache__
 lightning_logs
+new_lightning_logs
 data/**/images
 data/**/labels
