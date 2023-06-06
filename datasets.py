@@ -1,5 +1,5 @@
+import pytorch_lightning as pl
 import os
-import shutil
 import torch
 import numpy as np
 import tqdm
@@ -42,24 +42,33 @@ class RoboEireanData(torch.utils.data.Dataset):
         assert self.images[idx][:-3] == self.labels[idx][:-3]
         image_path = os.path.join(self.data_path, "images", self.images[idx])
         label_path = os.path.join(self.data_path, "labels", self.labels[idx])
+
         image = Image.open(image_path)
-        label_strings = open(label_path).read().splitlines()
-        target_bounding_boxes = []
-        target_classes = []
+        with open(label_path) as f:
+            label_strings = f.read().splitlines()
+
+        target_bounding_boxes_list = []
+        target_classes_list = []
+
         for label_string in label_strings:
             parsed_target_class = int(label_string[0])
             if self.CLASSES[parsed_target_class] in self.selected_classes:
-                target_classes.append(
+                target_classes_list.append(
                     self.selected_classes.index(self.CLASSES[parsed_target_class])
                 )
-                target_bounding_boxes.append(
+                target_bounding_boxes_list.append(
                     np.fromstring(label_string[1:], sep=" ", dtype=np.float32)
                 )
-        target_bounding_boxes = torch.tensor(np.array(target_bounding_boxes))
-        target_classes = torch.tensor(np.array(target_classes)) + 1
-        target_classes = target_classes.unsqueeze(1)
-        if self.bounding_box_transforms:
-            target_bounding_boxes = self.bounding_box_transforms(target_bounding_boxes)
+
+        target_bounding_boxes = torch.tensor(np.array(target_bounding_boxes_list))
+        target_classes = (
+            torch.tensor(np.array(target_classes_list), dtype=torch.long) + 1
+        )
+
+        for transform in self.bounding_box_transforms:
+            target_bounding_boxes, target_classes = transform(
+                target_bounding_boxes, target_classes
+            )
         if self.image_transforms:
             image = self.image_transforms(image)
         return image, target_bounding_boxes, target_classes
@@ -68,81 +77,88 @@ class RoboEireanData(torch.utils.data.Dataset):
         return len(self.images)
 
 
-class RoboEireanDataWithEncoder(torch.utils.data.Dataset):
-    """
-    A PyTorch Dataset for the RoboEirean dataset that encodes bounding boxes using an Encoder object.
-
-    Args:
-        data_path (str): The path to the RoboEirean dataset.
-        encoder (utils.Encoder): An Encoder object that will be used to encode the bounding boxes.
-        selected_classes (list[str]): A list of the classes to include in the dataset.
-        image_transforms (optional): A transformation to apply to the images.
-        bounding_box_transforms (optional): A transformation to apply to the bounding boxes.
-    """
-
+class RoboEireanDataModule(pl.LightningDataModule):
     def __init__(
         self,
         data_path: str,
-        encoder: utils.Encoder,
         selected_classes: list[str],
-        image_transforms=None,
-        bounding_box_transforms=None,
-    ) -> None:
-        self.dataset = RoboEireanData(
-            data_path, selected_classes, image_transforms, bounding_box_transforms
-        )
+        encoder: utils.Encoder,
+        batch_size: int = 32,
+    ):
+        super().__init__()
+        self.data_path = data_path
+        self.selected_classes = selected_classes
         self.encoder = encoder
+        self.batch_size = batch_size
+        self.image_transforms = T.Compose(
+            [
+                T.Grayscale(),
+                T.PILToTensor(),
+                T.ConvertImageDtype(torch.float32),
+                T.Resize((60, 80), antialias=True),
+            ]
+        )
+        self.bounding_box_transforms = [self.encoder.encode]
 
-    def __getitem__(self, idx):
-        image, target_bounding_boxes, target_classes = self.dataset[idx]
-        (
-            encoded_bounding_boxes,
-            target_mask,
-            target_classes,
-        ) = self.encoder.apply(target_bounding_boxes, target_classes)
-        return image, encoded_bounding_boxes, target_mask, target_classes
+    def setup(self, stage: str = None):
+        # TODO: Consider joining the traing and validation data
+        # TODO: Consider encoding the data once at the start of training
+        self.train_dataset = RoboEireanData(
+            os.path.join(self.data_path, "train"),
+            self.selected_classes,
+            image_transforms=self.image_transforms,
+            bounding_box_transforms=self.bounding_box_transforms,
+        )
+        self.val_dataset = RoboEireanData(
+            os.path.join(self.data_path, "val"),
+            self.selected_classes,
+            image_transforms=self.image_transforms,
+            bounding_box_transforms=self.bounding_box_transforms,
+        )
 
-    def __len__(self):
-        return len(self.dataset)
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.train_dataset, batch_size=self.batch_size, shuffle=True
+        )
+
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.val_dataset, batch_size=self.batch_size, shuffle=False
+        )
 
 
-class TransformedRoboEireanData(torch.utils.data.Dataset):
+class SyntheticDataModule(pl.LightningDataModule):
+    IMAGE_WIDTH = 80
+    IMAGE_HEIGHT = 60
+    LENGTH = 16
+
     def __init__(
         self,
-        data_path: str,
         encoder: utils.Encoder,
-    ) -> None:
-        self.encoder = encoder
-        loaded_images = torch.load(os.path.join(data_path, "transformed_images.pt"))
-        bounding_boxes = torch.load(os.path.join(data_path, "target_bounding_boxes.pt"))
-        object_classes = torch.load(os.path.join(data_path, "target_classes.pt"))
-        self.images = []
-        self.encoded_bounding_boxes = []
-        self.encoded_target_classes = []
-        self.target_masks = []
-        for bounding_box, object_class, image in zip(
-            bounding_boxes, object_classes, loaded_images
-        ):
-            (
-                encoded_bounding_boxes,
-                target_mask,
-                target_classes,
-            ) = self.encoder.apply(bounding_box, object_class)
-            self.encoded_bounding_boxes.append(encoded_bounding_boxes)
-            self.encoded_target_classes.append(target_classes)
-            self.target_masks.append(target_mask)
-            self.images.append(image)
+        batch_size: int = 32,
+    ):
+        super().__init__()
 
-    def __getitem__(self, idx):
-        return (
-            self.images[idx],
-            self.encoded_bounding_boxes[idx],
-            self.target_masks[idx],
-            self.encoded_target_classes[idx],
+        self.encoder = encoder
+        self.batch_size = batch_size
+
+    def setup(self, stage: str = None):
+        self.train_dataset = SyntheticData(
+            self.IMAGE_WIDTH, self.IMAGE_HEIGHT, self.LENGTH, self.encoder
+        )
+        self.val_dataset = SyntheticData(
+            self.IMAGE_WIDTH, self.IMAGE_HEIGHT, int(self.LENGTH * 0.1), self.encoder
         )
 
-    def __len__(self):
-        return len(self.encoded_bounding_boxes)
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.train_dataset, batch_size=self.batch_size, shuffle=True
+        )
+
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.val_dataset, batch_size=self.batch_size, shuffle=False
+        )
 
 
 class SyntheticData(torch.utils.data.Dataset):
@@ -167,22 +183,19 @@ class SyntheticData(torch.utils.data.Dataset):
         self.images = []
         self.encoded_bounding_boxes = []
         self.encoded_target_classes = []
-        self.target_masks = []
         for _ in range(length):
             image, bounding_box = self._generate_image()
-            encoded_bounding_boxes, target_mask, target_classes = self.encoder.apply(
+            encoded_bounding_boxes, target_classes = self.encoder.encode(
                 bounding_box, torch.tensor([[1]])
             )
             self.images.append(image)
             self.encoded_bounding_boxes.append(encoded_bounding_boxes)
             self.encoded_target_classes.append(target_classes)
-            self.target_masks.append(target_mask)
 
     def __getitem__(self, idx: int):
         return (
             self.images[idx],
             self.encoded_bounding_boxes[idx],
-            self.target_masks[idx],
             self.encoded_target_classes[idx],
         )
 

@@ -27,26 +27,24 @@ class Encoder:
     def __init__(
         self,
         default_box_scalings: torch.Tensor,
-        classes: list[str],
+        num_classes: int,
         feature_map_size: tuple[int, int] = (10, 8),
         iou_threshold: float = 0.5,
     ) -> None:
         self.default_scalings = default_box_scalings
         self.feature_map_width, self.feature_map_height = feature_map_size
-        self.classes = classes
-        self.num_classes = len(classes)
+        self.num_classes = num_classes
         self.threshold = iou_threshold
         self.default_boxes_tl_br = self._default_boxes("tlbr")
         self.default_boxes_xy_wh = self._default_boxes("xywh")
 
-    def apply(
+    def encode(
         self, target_boxes: torch.Tensor, target_classes: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if target_boxes.size(0) == 0:
             num_default_boxes = self.default_boxes_xy_wh.size(0)
             return (
                 torch.zeros((num_default_boxes, NUM_BOX_PARAMETERS)),
-                torch.zeros((num_default_boxes,), dtype=torch.bool),
                 torch.zeros(num_default_boxes, dtype=torch.long),
             )
         target_boxes_tl_br = xywh_to_tlbr(target_boxes)
@@ -82,7 +80,7 @@ class Encoder:
         encoded_target_classes[is_object] = target_classes[
             best_idx[is_object]
         ].flatten()
-        return encoded_target_boxes, is_object, encoded_target_classes
+        return encoded_target_boxes, encoded_target_classes
 
     def encode_bounding_boxes(
         self, selected_target_boxes, selected_default_boxes, is_object
@@ -98,27 +96,24 @@ class Encoder:
         )
         return encoded_target_boxes
 
-    def decode_model_output(
-        self, predicted_boxes: torch.Tensor, encoded_predicted_classes: torch.Tensor
-    ) -> torch.Tensor:
+    def decode(self, bounding_boxes: torch.Tensor) -> torch.Tensor:
         """
-        Decode model output using the encoder. The decoded boxes are in (cx, cy, w, h) format.
+        Decode encoded bounding boxes. The decoded boxes are in (cx, cy, w, h) format.
 
         Prameters:
-        - predicted_boxes: raw model output with shape (batch_size, feature_map_width * feature_map_height, 4)
+        - predicted_boxes: (batch_size, num_default_boxes, 4)
+        - encoded_classes: (batch_size, num_default_boxes)
         """
-        assert predicted_boxes.dim() == 3
-        prediction_is_object = encoded_predicted_classes > 0
-        decoded_boxes = torch.zeros_like(predicted_boxes)
-        decoded_boxes[:, :, 0:2] = (
-            self.default_boxes_xy_wh[:, 2:4] * (predicted_boxes[:, :, 0:2])
+        assert bounding_boxes.dim() == 3
+        decoded_boxes = torch.zeros_like(bounding_boxes)
+        decoded_boxes[..., 0:2] = (
+            self.default_boxes_xy_wh[:, 2:4] * (bounding_boxes[..., 0:2])
             + self.default_boxes_xy_wh[:, 0:2]
         )
-        decoded_boxes[:, :, 2:4] = self.default_boxes_xy_wh[:, 2:4] * torch.exp(
-            predicted_boxes[:, :, 2:4]
+        decoded_boxes[..., 2:4] = self.default_boxes_xy_wh[:, 2:4] * torch.exp(
+            bounding_boxes[..., 2:4]
         )
-        decoded_boxes = decoded_boxes.reshape((-1, NUM_BOX_PARAMETERS))
-        return (decoded_boxes, encoded_predicted_classes, prediction_is_object)
+        return decoded_boxes
 
     def _default_boxes(self, type: str):
         assert type in ["xywh", "tlbr"]

@@ -1,11 +1,313 @@
+from PIL import Image
 import torch
 from torch import nn
 from torchmetrics.classification import MulticlassAccuracy
 import torch.nn.functional as F
 import torch.optim as optim
 import pytorch_lightning as pl
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 import utils
+
+import torchmetrics
+
+# from visualize import draw_bounding_box, image_grid
+from torchvision.utils import draw_bounding_boxes, make_grid
+
+
+class ObjectDetectionTask(pl.LightningModule):
+    def __init__(
+        self,
+        model: pl.LightningModule,
+        loss: pl.LightningModule,
+        encoder: utils.Encoder,
+    ):
+        super().__init__()
+        self.model = model
+        self.loss = loss
+        self.encoder = encoder
+        # TODO: Adjust bounding box format
+        self.mean_average_precision = MeanAveragePrecision()
+
+    def _shared_eval_step(self, batch, batch_idx):
+        images, encoded_target_bounding_boxes, encoded_target_classes = batch
+        (
+            encoded_predicted_bounding_boxes,
+            encoded_predicted_class_logits,
+        ) = self.model.forward(images)
+
+        total_loss, location_loss, classification_loss = self.loss(
+            encoded_target_bounding_boxes,
+            encoded_target_classes,
+            encoded_predicted_bounding_boxes,
+            encoded_predicted_class_logits,
+        )
+
+        predicted_bounding_boxes = self.encoder.decode(encoded_predicted_bounding_boxes)
+        target_bounding_boxes = self.encoder.decode(encoded_target_bounding_boxes)
+
+        _, _, height, width = images.shape
+        target_bounding_boxes = convert_to_absolute_coordinates(
+            target_bounding_boxes, (height, width)
+        )
+        predicted_bounding_boxes = convert_to_absolute_coordinates(
+            predicted_bounding_boxes, (height, width)
+        )
+
+        target_is_object = encoded_target_classes > 0
+        target_bounding_boxes = target_bounding_boxes[target_is_object]
+        target_classes = encoded_target_classes[target_is_object]
+
+        _, _, num_classes = encoded_predicted_class_logits.shape
+        predicted_class_scores = F.softmax(encoded_predicted_class_logits, dim=2)
+        predicted_class = predicted_class_scores.argmax(dim=2)
+
+        predictions = [
+            dict(
+                boxes=predicted_bounding_boxes.reshape((-1, 4)),
+                scores=predicted_class_scores.reshape((-1, num_classes))[:, 1],
+                labels=predicted_class.flatten(),
+            )
+        ]
+        targets = [
+            dict(
+                boxes=target_bounding_boxes,
+                labels=target_classes,
+            )
+        ]
+        self.mean_average_precision(
+            predictions,
+            targets,
+        )
+        return (
+            total_loss,
+            location_loss,
+            classification_loss,
+            predicted_bounding_boxes,
+            predicted_class_scores,
+        )
+
+    def training_step(self, batch, batch_idx):
+        total_loss, location_loss, classification_loss, _, _ = self._shared_eval_step(
+            batch, batch_idx
+        )
+        self.log_dict(
+            {
+                "train/total_loss": total_loss,
+                "train/location_loss": location_loss,
+                "train/classification_loss": classification_loss,
+            },
+            on_step=True,
+            prog_bar=True,
+        )
+        return total_loss
+
+    def on_training_epoch_end(self):
+        self.log_dict(self.mean_average_precision.compute())
+
+    def validation_step(self, batch, batch_idx):
+        (
+            total_loss,
+            location_loss,
+            classification_loss,
+            predicted_bounding_boxes,
+            predicted_class_scores,
+        ) = self._shared_eval_step(batch, batch_idx)
+        self.log_dict(
+            {
+                "validation/total_loss": total_loss,
+                "validation/location_loss": location_loss,
+                "validation/classification_loss": classification_loss,
+            }
+        )
+        if batch_idx == 0:
+            images, encoded_target_bounding_boxes, encoded_target_classes = batch
+            target_bounding_boxes = self.encoder.decode(encoded_target_bounding_boxes)
+            prediction_grid = draw_image_grid(
+                images,
+                target_bounding_boxes,
+                encoded_target_classes,
+                predicted_bounding_boxes,
+                predicted_class_scores,
+            )
+            self.logger.experiment.add_image("grid", prediction_grid)
+
+        return total_loss
+
+    def on_validation_epoch_end(self):
+        self.log_dict(self.mean_average_precision.compute())
+
+    def configure_optimizers(self):
+        return self.model.configure_optimizers()
+
+
+def draw_image_grid(
+    images: torch.Tensor,
+    target_bounding_boxes: torch.Tensor,
+    target_classes: torch.Tensor,
+    predicted_bounding_boxes: torch.Tensor,
+    predicted_class_scores: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Draw grid of images  with bounding boxes and predicted bounding boxes
+
+    Parameters:
+    - images: (batch_size, 1, height, width)
+    - target_bounding_boxes: (batch_size, num_default_boxes, 4)
+    - target_classes: (batch_size, num_default_boxes)
+    - predicted_bounding_boxes: (batch_size, num_predicted_boxes, 4)
+    - predicted_class_scores: (batch_size, num_predicted_boxes, num_classes + 1)
+    """
+    assert images.dim() == 4
+    assert target_bounding_boxes.dim() == 3
+    assert target_classes.dim() == 2
+    assert predicted_bounding_boxes.dim() == 3
+    assert predicted_class_scores.dim() == 3
+    assert images.size(0) == target_bounding_boxes.size(0)
+    assert target_bounding_boxes.size(1) == target_classes.size(1)
+    assert images.size(0) == target_classes.size(0)
+    assert images.size(0) == predicted_bounding_boxes.size(0)
+    assert predicted_bounding_boxes.size(1) == predicted_class_scores.size(1)
+
+    images = images.cpu()
+    target_bounding_boxes = target_bounding_boxes.cpu()
+    target_classes = target_classes.cpu()
+    predicted_bounding_boxes = predicted_bounding_boxes.cpu()
+    predicted_class_scores = predicted_class_scores.cpu()
+
+    images = convert_to_uint8(images, torch.tensor([0.5, 0.5]))
+
+    # Convert to absolute coordinates
+    # Convert from (cx, cy, w, h) to (x1, y1, x2, y2)
+    target_bounding_boxes = convert_to_absolute_coordinates(
+        target_bounding_boxes, images.size()[2:]
+    )
+    predicted_bounding_boxes = convert_to_absolute_coordinates(
+        predicted_bounding_boxes, images.size()[2:]
+    )
+    is_object = target_classes > 0
+    target_bounding_boxes = [
+        target_bounding_boxes[i][is_object[i]] for i in range(images.size(0))
+    ]
+    images = [
+        draw_bounding_boxes(image, bounding_boxes)
+        for image, bounding_boxes in zip(images, target_bounding_boxes)
+    ]
+    images = [
+        draw_bounding_boxes(image, bounding_boxes)
+        for image, bounding_boxes in zip(images, predicted_bounding_boxes)
+    ]
+
+    return make_grid(images, nrow=4)
+
+
+def convert_to_uint8(images: torch.Tensor, normalize: torch.Tensor) -> torch.Tensor:
+    """
+    Convert image to uint8
+
+    Parameters:
+    - image: (B, C, H, W)
+    - normalize: (2,)
+    """
+    assert images.dim() == 4
+    assert normalize.dim() == 1
+
+    images = images * normalize[1] + normalize[0]
+    images = images * 255
+    images = images.to(torch.uint8)
+    return images
+
+
+def convert_to_absolute_coordinates(
+    bounding_boxes: torch.Tensor, image_size: tuple[int, int]
+) -> torch.Tensor:
+    """
+    Convert bounding boxes from (cx, cy, w, h) to (x1, y1, x2, y2)
+
+    Parameters:
+    - bounding_boxes: (batch_size, num_boxes, 4)
+    - image_size: (height, width)
+    """
+    assert bounding_boxes.dim() == 3
+    assert bounding_boxes.size(2) == 4
+    assert len(image_size) == 2
+
+    bounding_boxes = bounding_boxes * torch.tensor(
+        [image_size[1], image_size[0], image_size[1], image_size[0]]
+    )
+    bounding_boxes = torch.concat(
+        (
+            bounding_boxes[:, :, :2] - bounding_boxes[:, :, 2:] / 2,
+            bounding_boxes[:, :, :2] + bounding_boxes[:, :, 2:] / 2,
+        ),
+        dim=2,
+    )
+    return bounding_boxes
+
+
+class SingleShotDetectorLoss(pl.LightningModule):
+    def __init__(self, alpha: float = 1.0):
+        super().__init__()
+        self.save_hyperparameters()
+        self.alpha = alpha
+
+    def forward(
+        self,
+        target_bounding_boxes: torch.Tensor,
+        target_classes: torch.Tensor,
+        predicted_bounding_boxes: torch.Tensor,
+        predicted_class_logits: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Parameters:
+        - target_bounding_boxes: (batch_size, num_target_boxes, 4)
+        - target_classes: (batch_size, num_target_boxes)
+        - predicted_bounding_boxes: (batch_size, num_target_boxes, 4)
+        - predicted_class_logits: (batch_size, num_target_boxes, num_classes + 1)
+        """
+        assert target_bounding_boxes.dim() == 3
+        assert target_classes.dim() == 2
+        assert predicted_bounding_boxes.dim() == 3
+        assert predicted_class_logits.dim() == 3
+        assert target_bounding_boxes.size(0) == target_classes.size(0)
+        assert target_bounding_boxes.size(1) == predicted_bounding_boxes.size(1)
+        assert target_bounding_boxes.size(1) == predicted_class_logits.size(1)
+        assert predicted_class_logits.size(2) >= target_classes.max() + 1
+
+        target_is_object = target_classes > 0
+        # TODO: Check this. Sum over the whole batch instead of each image
+        number_of_positive = target_is_object.sum()
+        number_of_positive = number_of_positive.clamp(min=1)
+        number_of_negative = number_of_positive * 3
+
+        location_loss = (
+            F.smooth_l1_loss(
+                predicted_bounding_boxes[target_is_object],
+                target_bounding_boxes[target_is_object],
+                reduction="sum",
+            )
+            / number_of_positive.sum()
+        )
+
+        batch_size, num_target_boxes, num_classes = predicted_class_logits.shape
+        classification_loss = F.cross_entropy(
+            predicted_class_logits.reshape(
+                (batch_size * num_target_boxes, num_classes)
+            ),
+            target_classes.flatten(),
+            reduction="none",
+        )
+        positive_classification_loss = classification_loss[target_is_object.flatten()]
+        negative_classification_loss = classification_loss[~target_is_object.flatten()]
+        sorted_loss, _ = negative_classification_loss.sort(descending=True)
+        # Hard negative mining
+        number_of_negative = torch.clamp(number_of_negative, max=sorted_loss.size(0))
+        mined_classification_loss = (
+            sorted_loss[:number_of_negative].sum() + positive_classification_loss.sum()
+        ) / (number_of_negative + number_of_positive.sum())
+
+        total_loss = location_loss + self.alpha * mined_classification_loss
+        return total_loss, location_loss, mined_classification_loss
 
 
 class DepthWise(nn.Module):
@@ -60,21 +362,24 @@ class NormConv2dReLU(nn.Module):
         return x
 
 
-# TODO: handle hyperparameters differently
-class MultiClassJetNet(pl.LightningModule):
+class JetNet(pl.LightningModule):
     NUM_BOX_PARAMETERS = 4
 
-    def __init__(self, num_classes, num_boxes, learning_rate: float) -> None:
+    def __init__(
+        self,
+        num_classes: int,
+        num_default_scalings: int,
+        learning_rate: float,
+    ) -> None:
         super().__init__()
-        self.mean_average_precisions = []
         self.learning_rate = learning_rate
         self.num_classes = num_classes
-        self.num_boxes = num_boxes
+        self.num_default_boxes = num_default_scalings
+
         self.accuracy = MulticlassAccuracy(num_classes=num_classes + 1, average=None)
+
         self.block_channels = [[24, 16, 16, 20], [20, 20, 20, 20, 24]]
-
         self.input_layer = NormConv2dReLU(1, 16)
-
         self.depth_wise_backbone = [DepthWise(16, 24, use_stride=True)]
         for block_channel in self.block_channels:
             for in_channels, out_channels in zip(
@@ -96,7 +401,7 @@ class MultiClassJetNet(pl.LightningModule):
 
         self.output_layer = nn.Conv2d(
             24,
-            (self.num_classes + 1 + self.NUM_BOX_PARAMETERS) * self.num_boxes,
+            (self.num_classes + 1 + self.NUM_BOX_PARAMETERS) * self.num_default_boxes,
             1,
             padding="same",
         )
@@ -106,120 +411,33 @@ class MultiClassJetNet(pl.LightningModule):
         x = self.depth_wise_backbone(x)
         x = self.classifier(x)
         x = self.output_layer(x)
-        return self._format_model_output(x)
+        return self._process_model_output(x)
 
-    def _format_model_output(
-        self, output: torch.Tensor
+    def _process_model_output(
+        self, model_output: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        output: (batch_size, num_anchors * (num_classes + 1 + 4), feature_map_height, feature_map_height)
+        Process model output to get predicted bounding boxes and predicted class logits
+
+        Parameters:
+            model_output: (batch_size, num_default_boxes * (num_classes + 1 + 4), feature_map_height, feature_map_height)
         """
-        batch_size, _, feature_map_height, feature_map_width = output.shape
-        output = output.permute((0, 2, 3, 1))
-        output = output.reshape(
+        assert model_output.dim() == 4
+        batch_size, _, feature_map_height, feature_map_width = model_output.shape
+        model_output = model_output.permute((0, 2, 3, 1))
+        model_output = model_output.reshape(
             (
                 -1,
                 feature_map_height,
                 feature_map_width,
-                self.num_boxes,
+                self.num_default_boxes,
                 self.NUM_BOX_PARAMETERS + self.num_classes + 1,
             )
         )
-        predicted_boxes = output[:, :, :, :, 0 : self.NUM_BOX_PARAMETERS].reshape(
-            (batch_size, -1, self.NUM_BOX_PARAMETERS)
+        predicted_bounding_boxes = model_output[
+            ..., 0 : self.NUM_BOX_PARAMETERS
+        ].reshape((batch_size, -1, self.NUM_BOX_PARAMETERS))
+        predicted_class_logits = model_output[..., self.NUM_BOX_PARAMETERS :].reshape(
+            (batch_size, -1, self.num_classes + 1)
         )
-        predicted_class_logits = output[:, :, :, :, self.NUM_BOX_PARAMETERS :].reshape(
-            (-1, self.num_classes + 1)
-        )
-        return predicted_boxes, predicted_class_logits
-
-    def training_step(
-        self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], _
-    ):
-        image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
-        encoded_predicted_boxes, predicted_class_logits = self(image)
-        mined_classification_loss, location_loss = self.bounding_box_loss(
-            encoded_target_boxes,
-            target_is_object,
-            encoded_target_classes,
-            encoded_predicted_boxes,
-            predicted_class_logits,
-        )
-        with torch.no_grad():
-            accuracy = self.accuracy(
-                predicted_class_logits, encoded_target_classes.flatten()
-            )
-        self.log("train/accuracy/no_object", accuracy[0])
-        self.log(
-            f"train/accuracy/robot",
-            accuracy[1],
-        )
-        self.log("train/loss/classification", mined_classification_loss)
-        self.log("train/loss/location", location_loss)
-        return mined_classification_loss + location_loss
-
-    def validation_step(
-        self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], _
-    ):
-        image, encoded_target_boxes, target_is_object, encoded_target_classes = batch
-        encoded_predicted_boxes, predicted_class_logits = self(image)
-        mined_classification_loss, location_loss = self.bounding_box_loss(
-            encoded_target_boxes,
-            target_is_object,
-            encoded_target_classes,
-            encoded_predicted_boxes,
-            predicted_class_logits,
-        )
-        with torch.no_grad():
-            accuracy = self.accuracy(
-                predicted_class_logits, encoded_target_classes.flatten()
-            )
-        self.log("val/accuracy/no_object", accuracy[0])
-        self.log(
-            f"val/accuracy/robot",
-            accuracy[1],
-        )
-        self.log("val/loss/classification", mined_classification_loss)
-        self.log("val/loss/location", location_loss)
-
-    def bounding_box_loss(
-        self,
-        target_boxes: torch.Tensor,
-        target_is_object: torch.Tensor,
-        target_classes: torch.Tensor,
-        predicted_boxes: torch.Tensor,
-        predicted_class_logits: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        selected_predicted_boxes = predicted_boxes[target_is_object]
-        selected_target_boxes = target_boxes[target_is_object]
-        number_of_positive = selected_predicted_boxes.size(0)
-        if number_of_positive > 0:
-            location_loss = (
-                F.smooth_l1_loss(
-                    selected_predicted_boxes, selected_target_boxes, reduction="sum"
-                )
-                / number_of_positive
-            )
-        else:
-            location_loss = 0.0
-
-        classfication_loss = F.cross_entropy(
-            predicted_class_logits,
-            target_classes.flatten(),
-            reduction="none",
-        )
-        positive_classification_loss = classfication_loss[target_is_object.flatten()]
-        negative_classification_loss = classfication_loss[~target_is_object.flatten()]
-        sorted_loss, _ = negative_classification_loss.sort(descending=True)
-        # Hard negative mining
-        number_of_negative = torch.clamp(
-            torch.tensor(3 * number_of_positive), max=sorted_loss.size(0)
-        )
-        mined_classification_loss = (
-            sorted_loss[:number_of_negative].sum() + positive_classification_loss.sum()
-        ) / (number_of_negative + number_of_positive)
-        return mined_classification_loss, location_loss
-
-    def configure_optimizers(self) -> optim.Optimizer:
-        optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
-        return optimizer
+        return predicted_bounding_boxes, predicted_class_logits
