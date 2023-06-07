@@ -26,16 +26,3 @@ if __name__ == "__main__":
     logger = TensorBoardLogger(save_dir="new_logs")
     trainer = pl.Trainer(max_epochs=10, logger=logger)
     trainer.fit(model=task, datamodule=data_module)
-    # for batch in data_module.train_dataloader():
-    #     images, target_bounding_boxes, target_classes = batch
-    #     loss_value = task.training_step(batch, 0)
-    #     print(loss_value)
-    #     break
-    # data_module.setup()
-    # num_robots = []
-    # for batch in data_module.train_dataloader():
-    #     predicted_boxes, predicted_classes = model(images)
-    #     loss = task.training_step(batch, 0)
-    #     print(loss)
-    #     # print(predicted_boxes.shape, predicted_classes.shape)
-    #     break

@@ -3,16 +3,10 @@ import torch
 from torch import nn
 from torchmetrics.classification import MulticlassAccuracy
 import torch.nn.functional as F
-import torch.optim as optim
 import pytorch_lightning as pl
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 import utils
-
-import torchmetrics
-
-# from visualize import draw_bounding_box, image_grid
-from torchvision.utils import draw_bounding_boxes, make_grid
 
 
 class ObjectDetectionTask(pl.LightningModule):
@@ -21,15 +15,16 @@ class ObjectDetectionTask(pl.LightningModule):
         model: pl.LightningModule,
         loss: pl.LightningModule,
         encoder: utils.Encoder,
+        learning_rate: float,
     ):
         super().__init__()
         self.model = model
         self.loss = loss
         self.encoder = encoder
-        # TODO: Adjust bounding box format
+        self.learning_rate = learning_rate
         self.mean_average_precision = MeanAveragePrecision()
 
-    def _shared_eval_step(self, batch, batch_idx):
+    def _shared_eval_step(self, batch):
         images, encoded_target_bounding_boxes, encoded_target_classes = batch
         (
             encoded_predicted_bounding_boxes,
@@ -83,14 +78,10 @@ class ObjectDetectionTask(pl.LightningModule):
             total_loss,
             location_loss,
             classification_loss,
-            predicted_bounding_boxes,
-            predicted_class_scores,
         )
 
     def training_step(self, batch, batch_idx):
-        total_loss, location_loss, classification_loss, _, _ = self._shared_eval_step(
-            batch, batch_idx
-        )
+        total_loss, location_loss, classification_loss = self._shared_eval_step(batch)
         self.log_dict(
             {
                 "train/total_loss": total_loss,
@@ -102,17 +93,17 @@ class ObjectDetectionTask(pl.LightningModule):
         )
         return total_loss
 
-    def on_training_epoch_end(self):
-        self.log_dict(self.mean_average_precision.compute())
+    def on_train_epoch_end(self):
+        self.log(
+            "train/mean_average_precision", self.mean_average_precision.compute()["map"]
+        )
 
     def validation_step(self, batch, batch_idx):
         (
             total_loss,
             location_loss,
             classification_loss,
-            predicted_bounding_boxes,
-            predicted_class_scores,
-        ) = self._shared_eval_step(batch, batch_idx)
+        ) = self._shared_eval_step(batch)
         self.log_dict(
             {
                 "validation/total_loss": total_loss,
@@ -120,102 +111,16 @@ class ObjectDetectionTask(pl.LightningModule):
                 "validation/classification_loss": classification_loss,
             }
         )
-        if batch_idx == 0:
-            images, encoded_target_bounding_boxes, encoded_target_classes = batch
-            target_bounding_boxes = self.encoder.decode(encoded_target_bounding_boxes)
-            prediction_grid = draw_image_grid(
-                images,
-                target_bounding_boxes,
-                encoded_target_classes,
-                predicted_bounding_boxes,
-                predicted_class_scores,
-            )
-            self.logger.experiment.add_image("grid", prediction_grid)
 
         return total_loss
 
     def on_validation_epoch_end(self):
-        self.log_dict(self.mean_average_precision.compute())
+        self.log(
+            "val/mean_average_precision", self.mean_average_precision.compute()["map"]
+        )
 
     def configure_optimizers(self):
-        return self.model.configure_optimizers()
-
-
-def draw_image_grid(
-    images: torch.Tensor,
-    target_bounding_boxes: torch.Tensor,
-    target_classes: torch.Tensor,
-    predicted_bounding_boxes: torch.Tensor,
-    predicted_class_scores: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Draw grid of images  with bounding boxes and predicted bounding boxes
-
-    Parameters:
-    - images: (batch_size, 1, height, width)
-    - target_bounding_boxes: (batch_size, num_default_boxes, 4)
-    - target_classes: (batch_size, num_default_boxes)
-    - predicted_bounding_boxes: (batch_size, num_predicted_boxes, 4)
-    - predicted_class_scores: (batch_size, num_predicted_boxes, num_classes + 1)
-    """
-    assert images.dim() == 4
-    assert target_bounding_boxes.dim() == 3
-    assert target_classes.dim() == 2
-    assert predicted_bounding_boxes.dim() == 3
-    assert predicted_class_scores.dim() == 3
-    assert images.size(0) == target_bounding_boxes.size(0)
-    assert target_bounding_boxes.size(1) == target_classes.size(1)
-    assert images.size(0) == target_classes.size(0)
-    assert images.size(0) == predicted_bounding_boxes.size(0)
-    assert predicted_bounding_boxes.size(1) == predicted_class_scores.size(1)
-
-    images = images.cpu()
-    target_bounding_boxes = target_bounding_boxes.cpu()
-    target_classes = target_classes.cpu()
-    predicted_bounding_boxes = predicted_bounding_boxes.cpu()
-    predicted_class_scores = predicted_class_scores.cpu()
-
-    images = convert_to_uint8(images, torch.tensor([0.5, 0.5]))
-
-    # Convert to absolute coordinates
-    # Convert from (cx, cy, w, h) to (x1, y1, x2, y2)
-    target_bounding_boxes = convert_to_absolute_coordinates(
-        target_bounding_boxes, images.size()[2:]
-    )
-    predicted_bounding_boxes = convert_to_absolute_coordinates(
-        predicted_bounding_boxes, images.size()[2:]
-    )
-    is_object = target_classes > 0
-    target_bounding_boxes = [
-        target_bounding_boxes[i][is_object[i]] for i in range(images.size(0))
-    ]
-    images = [
-        draw_bounding_boxes(image, bounding_boxes)
-        for image, bounding_boxes in zip(images, target_bounding_boxes)
-    ]
-    images = [
-        draw_bounding_boxes(image, bounding_boxes)
-        for image, bounding_boxes in zip(images, predicted_bounding_boxes)
-    ]
-
-    return make_grid(images, nrow=4)
-
-
-def convert_to_uint8(images: torch.Tensor, normalize: torch.Tensor) -> torch.Tensor:
-    """
-    Convert image to uint8
-
-    Parameters:
-    - image: (B, C, H, W)
-    - normalize: (2,)
-    """
-    assert images.dim() == 4
-    assert normalize.dim() == 1
-
-    images = images * normalize[1] + normalize[0]
-    images = images * 255
-    images = images.to(torch.uint8)
-    return images
+        return torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
 
 
 def convert_to_absolute_coordinates(
@@ -362,17 +267,15 @@ class NormConv2dReLU(nn.Module):
         return x
 
 
-class JetNet(pl.LightningModule):
+class JetNet(nn.Module):
     NUM_BOX_PARAMETERS = 4
 
     def __init__(
         self,
         num_classes: int,
         num_default_scalings: int,
-        learning_rate: float,
     ) -> None:
         super().__init__()
-        self.learning_rate = learning_rate
         self.num_classes = num_classes
         self.num_default_boxes = num_default_scalings
 
