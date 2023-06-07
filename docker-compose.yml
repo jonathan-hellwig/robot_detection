@@ -11,8 +11,8 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
   optuna-dashboard:
-    image: ghcr.io/optuna/optuna-dashboard:v0.10.0b1
-    entrypoint: 
+    image: ghcr.io/optuna/optuna-dashboard:v0.10.1b1
+    entrypoint:
       - /bin/sh
       - -c
       - |
