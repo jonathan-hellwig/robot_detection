@@ -1,19 +1,19 @@
-from PIL import Image
 import torch
 from torch import nn
-from torchmetrics.classification import MulticlassAccuracy
 import torch.nn.functional as F
-import pytorch_lightning as pl
+
+# import pytorch_lightning as pl
+import lightning
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 import utils
 
 
-class ObjectDetectionTask(pl.LightningModule):
+class ObjectDetectionTask(lightning.LightningModule):
     def __init__(
         self,
-        model: pl.LightningModule,
-        loss: pl.LightningModule,
+        model,
+        loss,
         encoder: utils.Encoder,
         learning_rate: float,
     ):
@@ -116,7 +116,8 @@ class ObjectDetectionTask(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         self.log(
-            "val/mean_average_precision", self.mean_average_precision.compute()["map"]
+            "validation/mean_average_precision",
+            self.mean_average_precision.compute()["map"],
         )
 
     def configure_optimizers(self):
@@ -150,10 +151,9 @@ def convert_to_absolute_coordinates(
     return bounding_boxes
 
 
-class SingleShotDetectorLoss(pl.LightningModule):
+class SingleShotDetectorLoss(nn.Module):
     def __init__(self, alpha: float = 1.0):
         super().__init__()
-        self.save_hyperparameters()
         self.alpha = alpha
 
     def forward(
@@ -267,7 +267,7 @@ class NormConv2dReLU(nn.Module):
         return x
 
 
-class JetNet(nn.Module):
+class JetNet(lightning.LightningModule):
     NUM_BOX_PARAMETERS = 4
 
     def __init__(
@@ -278,8 +278,6 @@ class JetNet(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.num_default_boxes = num_default_scalings
-
-        self.accuracy = MulticlassAccuracy(num_classes=num_classes + 1, average=None)
 
         self.block_channels = [[24, 16, 16, 20], [20, 20, 20, 20, 24]]
         self.input_layer = NormConv2dReLU(1, 16)
