@@ -130,7 +130,7 @@ class RoboEireanDataModule(pl.LightningDataModule):
 class SyntheticDataModule(pl.LightningDataModule):
     IMAGE_WIDTH = 80
     IMAGE_HEIGHT = 60
-    LENGTH = 16
+    LENGTH = 1000
 
     def __init__(
         self,
