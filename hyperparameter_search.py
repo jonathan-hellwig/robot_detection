@@ -66,7 +66,7 @@ def objective(trial: optuna.trial.Trial):
     trainer = lightning.Trainer(
         max_epochs=30,
         callbacks=[
-            early_stopping_callback,
+            # early_stopping_callback,
             checkpoint_callback,
             pruning_callback,
         ],
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     study = optuna.create_study(
         study_name="mnist",
         direction="maximize",
-        storage=None,
+        storage=os.environ.get("OPTUNA_STORAGE"),
         sampler=sampler,
         pruner=pruner,
         load_if_exists=True,
