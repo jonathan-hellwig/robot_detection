@@ -3,3 +3,4 @@ optuna
 lightning
 torchvision
 torchmetrics
+pymysql
