@@ -1,3 +1,5 @@
+from pathlib import Path
+import argparse
 import shutil
 import urllib.request
 import zipfile
@@ -8,12 +10,8 @@ import torch
 
 
 def split_train_val(src_dir):
-    split_dir = os.path.join(
-        src_dir,
-        "SPLObjDetectDatasetV2",
-        "trainval",
-    )
-    image_dir = os.path.join(split_dir, "images")
+    split_dir = src_dir / "SPLObjDetectDatasetV2" / "trainval"
+    image_dir = split_dir / "images"
     images = os.listdir(image_dir)
     index = torch.randperm(len(images))
     train_index = index[int(0.2 * len(images)) :]
@@ -27,16 +25,16 @@ def split_train_val(src_dir):
 def move_files(src_dir, split, image_dir, label_dir, files):
     for file in tqdm(files, desc=f"Moving {split} files"):
         shutil.move(
-            os.path.join(image_dir, file + "png"),
-            os.path.join(src_dir, "raw", split, "images", file + "png"),
+            image_dir / (file + "png"),
+            src_dir / "raw" / split / "images" / (file + "png"),
         )
         shutil.move(
-            os.path.join(label_dir, file + "txt"),
-            os.path.join(src_dir, "raw", split, "labels", file + "txt"),
+            label_dir / (file + "txt"),
+            src_dir / "raw" / split / "labels" / (file + "txt"),
         )
 
 
-def download_raw_data(url, dir_name):
+def download_raw_data(url, dir_name: Path):
     response = urllib.request.urlopen(url)
     file_size = int(response.headers["Content-Length"])
     block_size = 8192
@@ -46,7 +44,7 @@ def download_raw_data(url, dir_name):
         unit_scale=True,
         desc="Downloading SPLObjDetectDatasetV2.zip",
     )
-    with open(os.path.join(dir_name, "SPLObjDetectDatasetV2.zip"), "wb") as f:
+    with open(dir_name / "SPLObjDetectDatasetV2.zip", "wb") as f:
         while True:
             buffer = response.read(block_size)
             if not buffer:
@@ -56,22 +54,28 @@ def download_raw_data(url, dir_name):
     progress_bar.close()
 
 
-def main():
-    url = "https://roboeireann.maynoothuniversity.ie/research/SPLObjDetectDatasetV2.zip"
-    dir_name = "data3"
+if __name__ == "__main__":
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--data_path", type=str, default="data")
+    args = argparser.parse_args()
+    data_path = Path(args.data_path)
+
+    data_url = (
+        "https://roboeireann.maynoothuniversity.ie/research/SPLObjDetectDatasetV2.zip"
+    )
 
     # Create the directory if it doesn't exist
-    os.makedirs(dir_name, exist_ok=True)
+    os.makedirs(data_path, exist_ok=True)
 
     # Download the file from the URL
     print("Downloading...")
-    download_raw_data(url, dir_name)
+    download_raw_data(data_url, data_path)
     print("\nDownload complete.")
 
     # Extract the contents of the zip file
     print("Extracting...")
-    zip_file = zipfile.ZipFile(os.path.join(dir_name, "SPLObjDetectDatasetV2.zip"))
-    zip_file.extractall(dir_name)
+    zip_file = zipfile.ZipFile(data_path / "SPLObjDetectDatasetV2.zip")
+    zip_file.extractall(data_path)
     print("Extraction complete.")
 
     # Define the directories to create
@@ -86,39 +90,33 @@ def main():
 
     # Create the directories
     for d in dirs:
-        os.makedirs(os.path.join(dir_name, "raw", d), exist_ok=True)
+        os.makedirs(os.path.join(data_path, "raw", d), exist_ok=True)
 
     # Split the data into train, val and test
-    train_files, val_files = split_train_val(dir_name)
+    train_files, val_files = split_train_val(data_path)
 
     # Move the files into the correct directories
     move_files(
-        dir_name,
+        data_path,
         "train",
-        os.path.join(dir_name, "SPLObjDetectDatasetV2", "trainval", "images"),
-        os.path.join(dir_name, "SPLObjDetectDatasetV2", "trainval", "labels"),
+        data_path / "SPLObjDetectDatasetV2" / "trainval" / "images",
+        data_path / "SPLObjDetectDatasetV2" / "trainval" / "labels",
         train_files,
     )
     move_files(
-        dir_name,
+        data_path,
         "val",
-        os.path.join(dir_name, "SPLObjDetectDatasetV2", "trainval", "images"),
-        os.path.join(dir_name, "SPLObjDetectDatasetV2", "trainval", "labels"),
+        data_path / "SPLObjDetectDatasetV2" / "trainval" / "images",
+        data_path / "SPLObjDetectDatasetV2" / "trainval" / "labels",
         val_files,
     )
-    test_files = os.listdir(
-        os.path.join(dir_name, "SPLObjDetectDatasetV2", "test", "images")
-    )
+    test_files = os.listdir(data_path / "SPLObjDetectDatasetV2" / "test" / "images")
     move_files(
-        dir_name,
+        data_path,
         "test",
-        os.path.join(dir_name, "SPLObjDetectDatasetV2", "test", "images"),
-        os.path.join(dir_name, "SPLObjDetectDatasetV2", "test", "labels"),
+        data_path / "SPLObjDetectDatasetV2" / "test" / "images",
+        data_path / "SPLObjDetectDatasetV2" / "test" / "labels",
         [file[:-3] for file in test_files],
     )
-    shutil.rmtree(os.path.join(dir_name, "SPLObjDetectDatasetV2"))
-    shutil.rmtree(os.path.join(dir_name, "SPLObjDetectDatasetV2.zip"))
-
-
-if __name__ == "__main__":
-    main()
+    shutil.rmtree(data_path / "SPLObjDetectDatasetV2")
+    os.remove(data_path / "SPLObjDetectDatasetV2.zip")
