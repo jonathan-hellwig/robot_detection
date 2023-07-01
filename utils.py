@@ -23,6 +23,33 @@ def xywh_to_tlbr(xywh_bounding_boxes: torch.Tensor) -> torch.Tensor:
     return tlbr_bounding_boxes
 
 
+def convert_to_absolute_coordinates(
+    bounding_boxes: torch.Tensor, image_size: tuple[int, int]
+) -> torch.Tensor:
+    """
+    Convert bounding boxes from (cx, cy, w, h) to (x1, y1, x2, y2)
+
+    Parameters:
+    - bounding_boxes: (batch_size, num_boxes, 4)
+    - image_size: (height, width)
+    """
+    assert bounding_boxes.dim() == 3
+    assert bounding_boxes.size(2) == 4
+    assert len(image_size) == 2
+
+    bounding_boxes = bounding_boxes * torch.tensor(
+        [image_size[1], image_size[0], image_size[1], image_size[0]]
+    )
+    bounding_boxes = torch.concat(
+        (
+            bounding_boxes[:, :, :2] - bounding_boxes[:, :, 2:] / 2,
+            bounding_boxes[:, :, :2] + bounding_boxes[:, :, 2:] / 2,
+        ),
+        dim=2,
+    )
+    return bounding_boxes
+
+
 class Encoder:
     def __init__(
         self,

@@ -2,7 +2,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-# import pytorch_lightning as pl
 import lightning
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
@@ -42,10 +41,10 @@ class ObjectDetectionTask(lightning.LightningModule):
         target_bounding_boxes = self.encoder.decode(encoded_target_bounding_boxes)
 
         _, _, height, width = images.shape
-        target_bounding_boxes = convert_to_absolute_coordinates(
+        target_bounding_boxes = utils.convert_to_absolute_coordinates(
             target_bounding_boxes, (height, width)
         )
-        predicted_bounding_boxes = convert_to_absolute_coordinates(
+        predicted_bounding_boxes = utils.convert_to_absolute_coordinates(
             predicted_bounding_boxes, (height, width)
         )
 
@@ -122,33 +121,6 @@ class ObjectDetectionTask(lightning.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
-
-
-def convert_to_absolute_coordinates(
-    bounding_boxes: torch.Tensor, image_size: tuple[int, int]
-) -> torch.Tensor:
-    """
-    Convert bounding boxes from (cx, cy, w, h) to (x1, y1, x2, y2)
-
-    Parameters:
-    - bounding_boxes: (batch_size, num_boxes, 4)
-    - image_size: (height, width)
-    """
-    assert bounding_boxes.dim() == 3
-    assert bounding_boxes.size(2) == 4
-    assert len(image_size) == 2
-
-    bounding_boxes = bounding_boxes * torch.tensor(
-        [image_size[1], image_size[0], image_size[1], image_size[0]]
-    )
-    bounding_boxes = torch.concat(
-        (
-            bounding_boxes[:, :, :2] - bounding_boxes[:, :, 2:] / 2,
-            bounding_boxes[:, :, :2] + bounding_boxes[:, :, 2:] / 2,
-        ),
-        dim=2,
-    )
-    return bounding_boxes
 
 
 class SingleShotDetectorLoss(nn.Module):
