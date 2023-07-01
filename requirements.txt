@@ -4,3 +4,4 @@ lightning
 torchvision
 torchmetrics
 pymysql
+tensorboard
