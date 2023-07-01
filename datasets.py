@@ -1,5 +1,5 @@
 import lightning
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import os
 import torch
 import numpy as np
@@ -82,13 +82,11 @@ class RoboEireanDataModule(pl.LightningDataModule):
     def __init__(
         self,
         data_path: str,
-        selected_classes: list[str],
         encoder: utils.Encoder,
         batch_size: int = 32,
     ):
         super().__init__()
         self.data_path = data_path
-        self.selected_classes = selected_classes
         self.encoder = encoder
         self.batch_size = batch_size
         self.image_transforms = T.Compose(
@@ -101,30 +99,31 @@ class RoboEireanDataModule(pl.LightningDataModule):
         )
         self.bounding_box_transforms = [self.encoder.encode]
 
-    def setup(self, stage: str = None):
+    def setup(self, stage: str):
         # TODO: Consider joining the traing and validation data
         # TODO: Consider encoding the data once at the start of training
-        self.train_dataset = RoboEireanData(
-            os.path.join(self.data_path, "train"),
-            self.selected_classes,
-            image_transforms=self.image_transforms,
-            bounding_box_transforms=self.bounding_box_transforms,
-        )
-        self.val_dataset = RoboEireanData(
-            os.path.join(self.data_path, "val"),
-            self.selected_classes,
-            image_transforms=self.image_transforms,
-            bounding_box_transforms=self.bounding_box_transforms,
-        )
+        if stage == "fit" or stage is None:
+            self.train_dataset = RoboEireanData(
+                os.path.join(self.data_path, "train"),
+                ["robot"],
+                image_transforms=self.image_transforms,
+                bounding_box_transforms=self.bounding_box_transforms,
+            )
+            self.val_dataset = RoboEireanData(
+                os.path.join(self.data_path, "val"),
+                ["robot"],
+                image_transforms=self.image_transforms,
+                bounding_box_transforms=self.bounding_box_transforms,
+            )
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
-            self.train_dataset, batch_size=self.batch_size, shuffle=True
+            self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=8
         )
 
     def val_dataloader(self):
         return torch.utils.data.DataLoader(
-            self.val_dataset, batch_size=self.batch_size, shuffle=False
+            self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=8
         )
 
 
@@ -143,7 +142,7 @@ class SyntheticDataModule(lightning.LightningDataModule):
         self.encoder = encoder
         self.batch_size = batch_size
 
-    def setup(self, stage: str = None):
+    def setup(self, stage: str):
         self.train_dataset = SyntheticData(
             self.IMAGE_WIDTH, self.IMAGE_HEIGHT, self.LENGTH, self.encoder
         )

@@ -1,13 +1,16 @@
 from utils import Encoder
 import torch
 from datasets import RoboEireanDataModule
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 from models import JetNet, SingleShotDetectorLoss, ObjectDetectionTask
 from lightning.pytorch.loggers import TensorBoardLogger
 
 if __name__ == "__main__":
-    default_scalings = torch.tensor(
+    LEARNING_RATE = 1e-1
+    ALPHA = 2.0
+    NUM_CLASSES = 1
+    DEFAULT_SCALINGS = torch.tensor(
         [
             [0.06549374, 0.12928654],
             [0.11965626, 0.26605093],
@@ -17,12 +20,12 @@ if __name__ == "__main__":
             [0.7293086, 0.8216225],
         ]
     )
-    encoder = Encoder(default_scalings, 1)
-    model = JetNet(1, default_scalings.shape[0], 0.01)
-    loss = SingleShotDetectorLoss()
-    data_module = RoboEireanDataModule("data/raw/", ["robot"], encoder)
-    data_module.setup()
-    task = ObjectDetectionTask(model, loss, encoder)
+    encoder = Encoder(DEFAULT_SCALINGS, NUM_CLASSES)
+    model = JetNet(NUM_CLASSES, DEFAULT_SCALINGS.shape[0])
+    loss = SingleShotDetectorLoss(ALPHA)
+    data_module = RoboEireanDataModule("data/raw/", encoder, 128)
+    data_module.setup("fit")
+    task = ObjectDetectionTask(model, loss, encoder, LEARNING_RATE)
     logger = TensorBoardLogger(save_dir="new_logs")
     trainer = pl.Trainer(max_epochs=10, logger=logger)
     trainer.fit(model=task, datamodule=data_module)

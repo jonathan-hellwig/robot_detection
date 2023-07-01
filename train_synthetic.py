@@ -22,7 +22,7 @@ task = ObjectDetectionTask(model, loss, encoder, learning_rate)
 
 tb_logger = pl_loggers.TensorBoardLogger(save_dir="synthetic_data_logs/")
 
-data_module.setup()
+data_module.setup("fit")
 trainer = pl.Trainer(
     limit_predict_batches=100,
     max_epochs=200,
