@@ -92,7 +92,7 @@ class ObjectDetectionTask(lightning.LightningModule):
         )
         return total_loss
 
-    def on_train_epoch_end(self):
+    def on_train_end(self):
         self.log(
             "train/mean_average_precision", self.mean_average_precision.compute()["map"]
         )
