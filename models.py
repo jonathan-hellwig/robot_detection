@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 import lightning
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torchmetrics.classification.accuracy import Accuracy
 
 import utils
 
@@ -21,6 +22,7 @@ class ObjectDetectionTask(lightning.LightningModule):
         self.loss = loss
         self.encoder = encoder
         self.learning_rate = learning_rate
+        self.accuracy = Accuracy(task="multiclass", num_classes=2)
         self.mean_average_precision = MeanAveragePrecision()
 
     def _shared_eval_step(self, batch):
@@ -73,19 +75,24 @@ class ObjectDetectionTask(lightning.LightningModule):
             predictions,
             targets,
         )
-        return (
+        self.accuracy(
+            encoded_predicted_class_logits.reshape((-1, 2)),
+            encoded_target_classes.flatten(),
+        )
+        return (total_loss, location_loss, classification_loss)
+
+    def training_step(self, batch, batch_idx):
+        (
             total_loss,
             location_loss,
             classification_loss,
-        )
-
-    def training_step(self, batch, batch_idx):
-        total_loss, location_loss, classification_loss = self._shared_eval_step(batch)
+        ) = self._shared_eval_step(batch)
         self.log_dict(
             {
                 "train/total_loss": total_loss,
                 "train/location_loss": location_loss,
                 "train/classification_loss": classification_loss,
+                "train/accuracy": self.accuracy,
             },
             on_step=True,
             prog_bar=True,
@@ -108,6 +115,7 @@ class ObjectDetectionTask(lightning.LightningModule):
                 "validation/total_loss": total_loss,
                 "validation/location_loss": location_loss,
                 "validation/classification_loss": classification_loss,
+                "validation/accuracy": self.accuracy,
             }
         )
 
