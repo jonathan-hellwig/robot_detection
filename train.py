@@ -7,7 +7,7 @@ from models import JetNet, SingleShotDetectorLoss, ObjectDetectionTask
 from lightning.pytorch.loggers import TensorBoardLogger
 
 if __name__ == "__main__":
-    LEARNING_RATE = 1e-1
+    LEARNING_RATE = 1e-2
     ALPHA = 2.0
     NUM_CLASSES = 1
     DEFAULT_SCALINGS = torch.tensor(
