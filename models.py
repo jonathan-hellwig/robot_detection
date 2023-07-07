@@ -22,7 +22,7 @@ class ObjectDetectionTask(lightning.LightningModule):
         self.loss = loss
         self.encoder = encoder
         self.learning_rate = learning_rate
-        self.accuracy = Accuracy(task="multiclass", num_classes=2)
+        self.accuracy = Accuracy(task="multiclass", num_classes=2, average=None)
         self.mean_average_precision = MeanAveragePrecision()
 
     def _shared_eval_step(self, batch):
@@ -87,12 +87,13 @@ class ObjectDetectionTask(lightning.LightningModule):
             location_loss,
             classification_loss,
         ) = self._shared_eval_step(batch)
+        accuracy = self.accuracy.compute()
         self.log_dict(
             {
                 "train/total_loss": total_loss,
                 "train/location_loss": location_loss,
                 "train/classification_loss": classification_loss,
-                "train/accuracy": self.accuracy,
+                "train/accuracy": accuracy[1],
             },
             on_step=True,
             prog_bar=True,
@@ -110,22 +111,17 @@ class ObjectDetectionTask(lightning.LightningModule):
             location_loss,
             classification_loss,
         ) = self._shared_eval_step(batch)
+        accuracy = self.accuracy.compute()
         self.log_dict(
             {
                 "validation/total_loss": total_loss,
                 "validation/location_loss": location_loss,
                 "validation/classification_loss": classification_loss,
-                "validation/accuracy": self.accuracy,
+                "validation/accuracy": accuracy[1],
             }
         )
 
         return total_loss
-
-    def on_validation_epoch_end(self):
-        self.log(
-            "validation/mean_average_precision",
-            self.mean_average_precision.compute()["map"],
-        )
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
